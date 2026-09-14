@@ -1,0 +1,28 @@
+# Copy to catalog.yaml (gitignored) and edit.
+#
+# Public URL is always https://<name>.<tailnet>.ts.net on 443.
+# The app's localhost port never appears in DNS — the Service
+# endpoint is tcp:443; local is only the Serve backend.
+#
+#   tscatalog plan
+#   tscatalog apply --dry-run
+#   tscatalog apply
+
+endpoint: tcp:443
+
+access:
+  src: [autogroup:member]
+  # Tag on the machine that may auto-advertise svc:*. Replace with a tag
+  # from your tailnet policy; this tool does not apply ACLs.
+  autoApproveHost: tag:server
+
+services:
+  - name: web
+    displayName: Example web UI
+    local: http://127.0.0.1:8080
+    comment: HTTPS on 443, proxied to a local HTTP server
+
+  - name: api
+    displayName: Example API
+    local: http://127.0.0.1:8081
+    comment: Second service on the same host

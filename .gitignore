@@ -1,0 +1,8 @@
+/tscatalog
+/catalog
+/dist/
+*.exe
+.env
+.env.*
+!.env.example
+catalog.yaml
