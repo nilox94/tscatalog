@@ -219,9 +219,9 @@ func runStatus(ctx context.Context, cat *catalog.File) error {
 				}
 			}
 		}
-		url := "https://" + s.Name + ".<tailnet>.ts.net"
+		url := "https://" + s.TailscaleLabel() + ".<tailnet>.ts.net"
 		if suffix != "" {
-			url = "https://" + s.Name + "." + suffix
+			url = "https://" + s.TailscaleLabel() + "." + suffix
 		}
 		fmt.Printf("%-14s %-10s %-28s %s\n", s.Name, apiPorts, serveT, url)
 	}
@@ -282,9 +282,9 @@ func printShow(s catalog.Service, endpoint string, api tailscale.Service, serve 
 	if s.Comment != "" {
 		fmt.Printf("  comment   %s\n", s.Comment)
 	}
-	url := "https://" + s.Name + ".<tailnet>.ts.net"
+	url := "https://" + s.TailscaleLabel() + ".<tailnet>.ts.net"
 	if suffix != "" {
-		url = "https://" + s.Name + "." + suffix
+		url = "https://" + s.TailscaleLabel() + "." + suffix
 	}
 	fmt.Printf("  url       %s\n", url)
 	fmt.Printf("  catalog   %s → %s\n", endpoint, s.Local)
@@ -363,7 +363,7 @@ func printURLs(ctx context.Context, cat *catalog.File) {
 	}
 	fmt.Println("public URLs")
 	for _, s := range cat.Services {
-		fmt.Printf("  https://%s.%s\n", s.Name, suffix)
+		fmt.Printf("  https://%s.%s\n", s.TailscaleLabel(), suffix)
 	}
 }
 
@@ -448,7 +448,7 @@ func runCheck(ctx context.Context, cat *catalog.File, names []string) error {
 		if hosts, err := tsapi.ListHosts(ctx, s.SVCName()); err == nil {
 			host = tsapi.ApprovalSummary(hosts)
 		}
-		r := lifecycle.Probe(ctx, s, publicBase(ctx, s.Name), host)
+		r := lifecycle.Probe(ctx, s, publicBase(ctx, s.TailscaleLabel()), host)
 		fmt.Printf("%-14s %-8s %-10s %-10s %s\n", r.Name, r.Bind, r.Local, r.Public, r.Host)
 		if !r.OK {
 			failed++

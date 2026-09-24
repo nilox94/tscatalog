@@ -49,6 +49,44 @@ services:
 	}
 }
 
+func TestRejectsInvalidDottedName(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "catalog.yaml")
+	raw := []byte(`
+endpoint: tcp:443
+services:
+  - name: bad..name
+    local: http://127.0.0.1:8080
+`)
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected invalid name error")
+	}
+}
+
+func TestLoadDottedServiceName(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "catalog.yaml")
+	raw := []byte(`
+endpoint: tcp:443
+services:
+  - name: clickstack.momoma
+    local: http://127.0.0.1:8080
+`)
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Services[0].SVCName() != "svc:clickstack-momoma" {
+		t.Fatalf("svc name %q", f.Services[0].SVCName())
+	}
+}
+
 func TestRejectsNonLoopback(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "catalog.yaml")

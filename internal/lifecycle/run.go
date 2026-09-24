@@ -7,9 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"tscatalog/internal/catalog"
@@ -36,40 +34,6 @@ func expandHome(p string) string {
 		return filepath.Join(home, p[2:])
 	}
 	return p
-}
-
-func runDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	dir := filepath.Join(home, "Library", "Application Support", "tscatalog", "run")
-	return dir, os.MkdirAll(dir, 0o700)
-}
-
-func logDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	dir := filepath.Join(home, "Library", "Logs", "tscatalog")
-	return dir, os.MkdirAll(dir, 0o755)
-}
-
-func pidPath(name string, index int) (string, error) {
-	dir, err := runDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, fmt.Sprintf("%s.%d.pid", name, index)), nil
-}
-
-func logPath(name string) (string, error) {
-	dir, err := logDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, name+".log"), nil
 }
 
 func command(spec catalog.LaunchSpec) *exec.Cmd {
@@ -134,37 +98,6 @@ func Start(ctx context.Context, s catalog.Service, w io.Writer) error {
 	}
 }
 
-func startDetached(name string, index int, spec catalog.LaunchSpec) error {
-	logFile, err := logPath(name)
-	if err != nil {
-		return err
-	}
-	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	cmd := command(spec)
-	cmd.Stdout = f
-	cmd.Stderr = f
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if err := cmd.Start(); err != nil {
-		f.Close()
-		return err
-	}
-	path, err := pidPath(name, index)
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(path, []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o600); err != nil {
-		return err
-	}
-	go func() {
-		_ = cmd.Wait()
-		f.Close()
-	}()
-	return nil
-}
-
 // Stop runs each spec's stop argv, or SIGTERM to a detached pidfile.
 func Stop(ctx context.Context, s catalog.Service, w io.Writer) error {
 	_ = ctx
@@ -198,31 +131,4 @@ func Stop(ctx context.Context, s catalog.Service, w io.Writer) error {
 		}
 	}
 	return first
-}
-
-func stopPID(name string, index int) error {
-	path, err := pidPath(name, index)
-	if err != nil {
-		return err
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("%s: no pidfile (not started by tscatalog?)", name)
-		}
-		return err
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
-	if err != nil {
-		return fmt.Errorf("%s: bad pidfile: %w", name, err)
-	}
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return err
-	}
-	if err := proc.Signal(syscall.SIGTERM); err != nil {
-		return fmt.Errorf("%s: signal %d: %w", name, pid, err)
-	}
-	_ = os.Remove(path)
-	return nil
 }

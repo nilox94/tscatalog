@@ -1,10 +1,15 @@
+//go:build unix
+
 package lifecycle
 
 import (
 	"context"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
+	"syscall"
 	"testing"
 	"time"
 
@@ -38,5 +43,35 @@ func TestStartDetachedAndStop(t *testing.T) {
 	}
 	if err := Stop(ctx, s, io.Discard); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestStopPIDLegacyPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "xdg-state"))
+
+	legDir := filepath.Join(home, "Library", "Application Support", "tscatalog", "run")
+	if err := os.MkdirAll(legDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legPath := filepath.Join(legDir, "legacy.0.pid")
+	script := filepath.Join(t.TempDir(), "short.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 60\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(script)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = syscall.Kill(cmd.Process.Pid, syscall.SIGKILL) }()
+	if err := os.WriteFile(legPath, []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := stopPID("legacy", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(legPath); !os.IsNotExist(err) {
+		t.Fatalf("legacy pidfile should be removed: %v", err)
 	}
 }

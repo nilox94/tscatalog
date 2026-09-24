@@ -1,6 +1,7 @@
 # Copy to catalog.yaml (gitignored) and edit.
 #
-# Public URL is always https://<name>.<tailnet>.ts.net on 443.
+# Public URL is always https://<tailscale-label>.<tailnet>.ts.net on 443.
+# Catalog name may contain dots; Tailscale VIP label defaults to hyphens (abc.xyz → abc-xyz) or set vip:.
 # The app's localhost port never appears in DNS — the Service
 # endpoint is tcp:443; local is only the Serve backend.
 #
@@ -35,7 +36,7 @@ services:
   - name: api
     displayName: Example API
     local: http://127.0.0.1:8081
-    comment: Second service on the same host; detach a long-running process
+    comment: Detach a long-running process (Unix); logs/pidfiles in XDG state dir
     launch:
       cwd: ~/src/api
       start: [api, serve, --bind, 127.0.0.1:8081]

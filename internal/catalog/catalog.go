@@ -15,7 +15,19 @@ import (
 const DefaultEndpoint = "tcp:443"
 const ServeVersion = "0.0.1"
 
-var nameRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+var labelRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
+func validServiceName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, label := range strings.Split(name, ".") {
+		if !labelRE.MatchString(label) {
+			return false
+		}
+	}
+	return true
+}
 
 // File is the on-disk catalog.
 type File struct {
@@ -34,6 +46,7 @@ type Access struct {
 
 type Service struct {
 	Name        string `yaml:"name"`
+	VIP         string `yaml:"vip,omitempty"`
 	DisplayName string `yaml:"displayName"`
 	Local       string `yaml:"local"`
 	Comment     string `yaml:"comment"`
@@ -41,8 +54,20 @@ type Service struct {
 	Check       Check  `yaml:"check"`
 }
 
+// TailscaleLabel is the single DNS label used for svc:* and https://<label>.<tailnet>.ts.net.
+// When name contains dots, set vip explicitly or it defaults to dots replaced by hyphens.
+func (s Service) TailscaleLabel() string {
+	if s.VIP != "" {
+		return s.VIP
+	}
+	if strings.Contains(s.Name, ".") {
+		return strings.ReplaceAll(s.Name, ".", "-")
+	}
+	return s.Name
+}
+
 func (s Service) SVCName() string {
-	return "svc:" + s.Name
+	return "svc:" + s.TailscaleLabel()
 }
 
 // CanonicalName strips a leading "svc:" so CLI args and API names match.
@@ -90,8 +115,11 @@ func (f *File) Validate() error {
 	seen := make(map[string]struct{}, len(f.Services))
 	for i := range f.Services {
 		s := &f.Services[i]
-		if !nameRE.MatchString(s.Name) {
-			return fmt.Errorf("service %q: name must be a DNS label (lowercase, digits, hyphen)", s.Name)
+		if !validServiceName(s.Name) {
+			return fmt.Errorf("service %q: name must be dot-separated DNS labels (lowercase, digits, hyphen)", s.Name)
+		}
+		if !labelRE.MatchString(s.TailscaleLabel()) {
+			return fmt.Errorf("service %q: tailscale label %q must be one DNS label (set vip:)", s.Name, s.TailscaleLabel())
 		}
 		if _, ok := seen[s.Name]; ok {
 			return fmt.Errorf("duplicate service %q", s.Name)
