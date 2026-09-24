@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -14,6 +13,8 @@ import (
 
 	"tscatalog/internal/catalog"
 	"tscatalog/internal/host"
+	"tscatalog/internal/lifecycle"
+	"tscatalog/internal/policy"
 	"tscatalog/internal/syncer"
 	"tscatalog/internal/tsapi"
 )
@@ -23,13 +24,23 @@ func usage() {
 
 Usage:
   tscatalog plan    [-f catalog.yaml]
-  tscatalog apply   [-f catalog.yaml] [--dry-run] [--tailnet-only] [--host-only]
+  tscatalog apply   [-f catalog.yaml] [--dry-run] [--tailnet-only] [--host-only] [--policy-only] [--no-policy]
+  tscatalog start   [-f catalog.yaml] [name ...]
+  tscatalog stop    [-f catalog.yaml] [name ...]
+  tscatalog check   [-f catalog.yaml] [name ...]
+  tscatalog up      [-f catalog.yaml] [name ...] [--no-publish]
   tscatalog status  [-f catalog.yaml]
   tscatalog show    [-f catalog.yaml] [name ...]
 
-plan     Diff the catalog against the VIP Services API and local Serve config.
-apply    PUT missing/changed VIP Services, then tailscale serve --https for
-         each new host mapping and advertise each svc:*. --dry-run is plan + no writes.
+plan     Diff VIP Services, local Serve, and the tailnet ACL against the catalog.
+apply    PUT missing VIP Services (including host tag), serve --https for new
+         host mappings, advertise each svc:*, and merge ACL tagOwners +
+         autoApprovers by service tag (and grants if there is no catch-all).
+         --dry-run is plan + no writes. --no-policy skips the ACL.
+start    Run each service's catalog launch and wait until the local bind is up.
+stop     Run catalog stop argv, or SIGTERM a process tscatalog detached.
+check    TCP + HTTP locally, HTTPS on the named URL, and host approval.
+up       start, then apply (publish), then check. --no-publish skips apply.
 status   List catalog rows with current API ports and Serve targets.
 show     Print one service (or all) with catalog, VIP, Serve, and public URL.
 
@@ -57,6 +68,9 @@ func main() {
 	dry := fs.Bool("dry-run", false, "print the plan and exit (apply)")
 	tailnetOnly := fs.Bool("tailnet-only", false, "only update VIP Services via the API")
 	hostOnly := fs.Bool("host-only", false, "only update local Serve mappings")
+	policyOnly := fs.Bool("policy-only", false, "only merge the tailnet ACL")
+	noPolicy := fs.Bool("no-policy", false, "skip ACL merge")
+	noPublish := fs.Bool("no-publish", false, "up: skip VIP/Serve/ACL apply")
 	fs.Usage = usage
 	if err := fs.Parse(os.Args[2:]); err != nil {
 		os.Exit(2)
@@ -81,11 +95,18 @@ func main() {
 			fatal(err)
 		}
 	case "apply":
+		if *policyOnly && (*hostOnly || *tailnetOnly) {
+			fatal(fmt.Errorf("--policy-only cannot be combined with --host-only or --tailnet-only"))
+		}
+		if *policyOnly && *noPolicy {
+			fatal(fmt.Errorf("--policy-only and --no-policy conflict"))
+		}
 		opts := syncer.Options{
 			DryRun:    *dry,
-			Tailnet:   !*hostOnly,
-			Host:      !*tailnetOnly,
-			Advertise: !*tailnetOnly,
+			Tailnet:   !*hostOnly && !*policyOnly,
+			Host:      !*tailnetOnly && !*policyOnly,
+			Advertise: !*tailnetOnly && !*policyOnly,
+			Policy:    (!*noPolicy && !*hostOnly && !*tailnetOnly) || *policyOnly,
 		}
 		if err := runApply(ctx, cat, opts); err != nil {
 			fatal(err)
@@ -96,6 +117,22 @@ func main() {
 		}
 	case "show":
 		if err := runShow(ctx, cat, fs.Args()); err != nil {
+			fatal(err)
+		}
+	case "start":
+		if err := runStart(ctx, cat, fs.Args()); err != nil {
+			fatal(err)
+		}
+	case "stop":
+		if err := runStop(ctx, cat, fs.Args()); err != nil {
+			fatal(err)
+		}
+	case "check":
+		if err := runCheck(ctx, cat, fs.Args()); err != nil {
+			fatal(err)
+		}
+	case "up":
+		if err := runUp(ctx, cat, fs.Args(), !*noPublish); err != nil {
 			fatal(err)
 		}
 	default:
@@ -111,31 +148,45 @@ func runPlan(ctx context.Context, cat *catalog.File) error {
 		return err
 	}
 	p := syncer.ComputePlan(cat, api, serve)
+	c, err := tsapi.NewClient()
+	if err != nil {
+		return err
+	}
+	acl, err := c.PolicyFile().Get(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "note: ACL unavailable: %v\n", err)
+	} else {
+		p.Policy = policyplan(cat, acl)
+	}
 	syncer.FprintPlan(os.Stdout, p)
 	printURLs(ctx, cat)
-	printACLHint(cat)
 	return nil
 }
 
 func runApply(ctx context.Context, cat *catalog.File, opts syncer.Options) error {
 	var api syncer.API
-	if opts.Tailnet {
+	var pol syncer.PolicyAPI
+	if opts.Tailnet || opts.Policy {
 		c, err := tsapi.NewClient()
 		if err != nil {
 			return err
 		}
-		api = syncer.ClientAPI{Services: c.Services()}
+		if opts.Tailnet {
+			api = syncer.ClientAPI{Services: c.Services()}
+		}
+		if opts.Policy {
+			pol = syncer.ClientPolicy{Policy: c.PolicyFile()}
+		}
 	}
 	var h syncer.Host
 	if opts.Host {
 		h = host.CLI{}
 	}
-	if err := syncer.Apply(ctx, cat, api, h, opts, os.Stdout); err != nil {
+	if err := syncer.Apply(ctx, cat, api, h, pol, opts, os.Stdout); err != nil {
 		return err
 	}
 	if !opts.DryRun {
 		printURLs(ctx, cat)
-		printACLHint(cat)
 	}
 	return nil
 }
@@ -204,7 +255,13 @@ func runShow(ctx context.Context, cat *catalog.File, names []string) error {
 		if i > 0 {
 			fmt.Println()
 		}
-		printShow(s, cat.Endpoint, byName[s.SVCName()], serve, suffix)
+		approval := ""
+		if hosts, err := tsapi.ListHosts(ctx, s.SVCName()); err != nil {
+			approval = "(approval unavailable)"
+		} else {
+			approval = tsapi.ApprovalSummary(hosts)
+		}
+		printShow(s, cat.Endpoint, byName[s.SVCName()], serve, suffix, approval)
 	}
 	return nil
 }
@@ -217,7 +274,7 @@ func shortNames(cat *catalog.File) []string {
 	return out
 }
 
-func printShow(s catalog.Service, endpoint string, api tailscale.Service, serve *catalog.ServeFile, suffix string) {
+func printShow(s catalog.Service, endpoint string, api tailscale.Service, serve *catalog.ServeFile, suffix, approval string) {
 	fmt.Printf("%s\n", s.SVCName())
 	if s.DisplayName != "" {
 		fmt.Printf("  display   %s\n", s.DisplayName)
@@ -265,6 +322,9 @@ func printShow(s catalog.Service, endpoint string, api tailscale.Service, serve 
 		}
 	}
 	fmt.Printf("  serve     %s\n", serveT)
+	if approval != "" {
+		fmt.Printf("  host      %s\n", approval)
+	}
 }
 
 func snapshot(ctx context.Context, wantAPI, wantHost bool) ([]tailscale.Service, *catalog.ServeFile, error) {
@@ -315,33 +375,102 @@ func magicSuffix(ctx context.Context) string {
 	return strings.TrimSuffix(md.Suffix, ".")
 }
 
-func printACLHint(cat *catalog.File) {
-	src := cat.Access.Src
-	if len(src) == 0 {
-		src = []string{"autogroup:member"}
+func policyplan(cat *catalog.File, acl *tailscale.ACL) []policy.Change {
+	return policy.ComputePlan(policy.FromCatalog(cat), acl).Changes
+}
+
+func selectServices(cat *catalog.File, names []string) ([]catalog.Service, error) {
+	if len(names) == 0 {
+		return cat.Services, nil
 	}
-	dst := make([]string, 0, len(cat.Services))
-	for _, s := range cat.Services {
-		dst = append(dst, s.SVCName())
+	out := make([]catalog.Service, 0, len(names))
+	for _, name := range names {
+		s, ok := cat.Lookup(name)
+		if !ok {
+			return nil, fmt.Errorf("unknown service %q (catalog: %s)", name, strings.Join(shortNames(cat), ", "))
+		}
+		out = append(out, s)
 	}
-	hint := map[string]any{
-		"grants": []map[string]any{{
-			"src": src,
-			"dst": dst,
-			"ip":  []string{"443"},
-		}},
+	return out, nil
+}
+
+func publicBase(ctx context.Context, name string) string {
+	suffix := magicSuffix(ctx)
+	if suffix == "" {
+		return ""
 	}
-	if hostTag := cat.Access.AutoApproveHost; hostTag != "" {
-		hint["autoApprovers"] = map[string]any{
-			"services": map[string][]string{"svc:*": {hostTag}},
+	return "https://" + name + "." + suffix
+}
+
+func runStart(ctx context.Context, cat *catalog.File, names []string) error {
+	svcs, err := selectServices(cat, names)
+	if err != nil {
+		return err
+	}
+	var first error
+	for _, s := range svcs {
+		if err := lifecycle.Start(ctx, s, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			if first == nil {
+				first = err
+			}
 		}
 	}
-	raw, err := json.MarshalIndent(hint, "", "  ")
+	return first
+}
+
+func runStop(ctx context.Context, cat *catalog.File, names []string) error {
+	svcs, err := selectServices(cat, names)
 	if err != nil {
-		return
+		return err
 	}
-	fmt.Println("policy (paste into the tailnet policy file if missing; not applied by this tool)")
-	fmt.Println(string(raw))
+	var first error
+	for _, s := range svcs {
+		if err := lifecycle.Stop(ctx, s, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			if first == nil {
+				first = err
+			}
+		}
+	}
+	return first
+}
+
+func runCheck(ctx context.Context, cat *catalog.File, names []string) error {
+	svcs, err := selectServices(cat, names)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%-14s %-8s %-10s %-10s %s\n", "SERVICE", "BIND", "LOCAL", "PUBLIC", "HOST")
+	var failed int
+	for _, s := range svcs {
+		host := "-"
+		if hosts, err := tsapi.ListHosts(ctx, s.SVCName()); err == nil {
+			host = tsapi.ApprovalSummary(hosts)
+		}
+		r := lifecycle.Probe(ctx, s, publicBase(ctx, s.Name), host)
+		fmt.Printf("%-14s %-8s %-10s %-10s %s\n", r.Name, r.Bind, r.Local, r.Public, r.Host)
+		if !r.OK {
+			failed++
+		}
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d service(s) unhealthy", failed)
+	}
+	return nil
+}
+
+func runUp(ctx context.Context, cat *catalog.File, names []string, publish bool) error {
+	if err := runStart(ctx, cat, names); err != nil {
+		return err
+	}
+	if publish {
+		opts := syncer.Options{Tailnet: true, Host: true, Advertise: true, Policy: true}
+		if err := runApply(ctx, cat, opts); err != nil {
+			return err
+		}
+	}
+	return runCheck(ctx, cat, names)
 }
 
 func fatal(err error) {

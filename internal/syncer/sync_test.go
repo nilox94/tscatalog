@@ -47,6 +47,22 @@ func TestComputePlanDetectsPortMismatch(t *testing.T) {
 	}
 }
 
+func TestComputePlanMissingHostTagIsUpdate(t *testing.T) {
+	want := sampleCatalog()
+	want.Access.AutoApproveHost = "tag:server"
+	have := []tailscale.Service{
+		{Name: "svc:web", Ports: []string{"tcp:443"}},
+		{Name: "svc:api", Ports: []string{"tcp:443"}, Tags: []string{"tag:server"}},
+	}
+	p := ComputePlan(want, have, want.ServeConfig())
+	if p.Tailnet[0].Action != "update" {
+		t.Fatalf("missing service tag should PUT: %+v", p.Tailnet[0])
+	}
+	if p.Tailnet[1].Action != "unchanged" {
+		t.Fatalf("tagged service should stay: %+v", p.Tailnet[1])
+	}
+}
+
 func TestComputePlanCommentOnlyIsUnchanged(t *testing.T) {
 	want := sampleCatalog()
 	want.Services[0].Comment = "example UI"
@@ -99,13 +115,14 @@ func (f *fakeHost) Advertise(_ context.Context, svc string) error {
 	f.advertised = append(f.advertised, svc)
 	return nil
 }
+func (f *fakeHost) Drain(_ context.Context, svc string) error { return nil }
 
 func TestApplyWritesVIPAndServe(t *testing.T) {
 	want := sampleCatalog()
 	api := &fakeAPI{}
 	h := &fakeHost{cfg: &catalog.ServeFile{Services: map[string]catalog.ServeService{}}}
 	var buf bytes.Buffer
-	err := Apply(context.Background(), want, api, h, Options{Tailnet: true, Host: true, Advertise: true}, &buf)
+	err := Apply(context.Background(), want, api, h, nil, Options{Tailnet: true, Host: true, Advertise: true}, &buf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +141,7 @@ func TestApplyDryRunDoesNotMutate(t *testing.T) {
 	want := sampleCatalog()
 	api := &fakeAPI{}
 	h := &fakeHost{}
-	if err := Apply(context.Background(), want, api, h, Options{DryRun: true, Tailnet: true, Host: true}, ioDiscard()); err != nil {
+	if err := Apply(context.Background(), want, api, h, nil, Options{DryRun: true, Tailnet: true, Host: true}, ioDiscard()); err != nil {
 		t.Fatal(err)
 	}
 	if len(api.puts) != 0 || len(h.served) != 0 {
@@ -143,7 +160,7 @@ func TestApplySkipsUnchangedAndMergesTags(t *testing.T) {
 	h := &fakeHost{cfg: &catalog.ServeFile{Services: map[string]catalog.ServeService{
 		"svc:web": {Endpoints: map[string]string{"tcp:443": "http://127.0.0.1:8080"}},
 	}}}
-	if err := Apply(context.Background(), want, api, h, Options{Tailnet: true, Host: true, Advertise: true}, ioDiscard()); err != nil {
+	if err := Apply(context.Background(), want, api, h, nil, Options{Tailnet: true, Host: true, Advertise: true}, ioDiscard()); err != nil {
 		t.Fatal(err)
 	}
 	if len(api.puts) != 1 || api.puts[0].Name != "svc:api" {
@@ -152,18 +169,21 @@ func TestApplySkipsUnchangedAndMergesTags(t *testing.T) {
 	if strings.Join(h.served, ",") != "svc:api tcp:443 http://127.0.0.1:8081" {
 		t.Fatalf("should not re-serve web: %v", h.served)
 	}
+	if strings.Join(h.advertised, ",") != "svc:web,svc:api" {
+		t.Fatalf("advertise all catalog services: %v", h.advertised)
+	}
 }
 
 func TestMergeForPutKeepsTags(t *testing.T) {
 	got := mergeForPut(
-		tailscale.Service{Name: "svc:web", Ports: []string{"tcp:443"}, Comment: "new"},
-		tailscale.Service{Name: "svc:web", Ports: []string{"tcp:8080"}, Tags: []string{"tag:server"}, Addrs: []string{"100.1.2.3"}},
+		tailscale.Service{Name: "svc:web", Ports: []string{"tcp:443"}, Comment: "new", Tags: []string{"tag:server"}},
+		tailscale.Service{Name: "svc:web", Ports: []string{"tcp:8080"}, Tags: []string{"tag:server"}, Addrs: []string{"100.1.2.3", "fd7a::1"}},
 	)
 	if got.Tags[0] != "tag:server" {
 		t.Fatalf("tags %v", got.Tags)
 	}
-	if len(got.Addrs) != 0 {
-		t.Fatalf("addrs should be omitted: %v", got.Addrs)
+	if len(got.Addrs) != 2 || got.Addrs[0] != "100.1.2.3" {
+		t.Fatalf("addrs should be kept on update: %v", got.Addrs)
 	}
 	if got.Comment != "new" || !catalog.PortsEqual(got.Ports, []string{"tcp:443"}) {
 		t.Fatalf("%+v", got)

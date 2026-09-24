@@ -27,6 +27,9 @@ type File struct {
 type Access struct {
 	Src             []string `yaml:"src"`
 	AutoApproveHost string   `yaml:"autoApproveHost"`
+	// TagOwners are allowed to apply AutoApproveHost. Empty means autogroup:admin
+	// when the policy merger fills an empty or missing tagOwners entry.
+	TagOwners []string `yaml:"tagOwners"`
 }
 
 type Service struct {
@@ -34,6 +37,8 @@ type Service struct {
 	DisplayName string `yaml:"displayName"`
 	Local       string `yaml:"local"`
 	Comment     string `yaml:"comment"`
+	Launch      Launch `yaml:"launch"`
+	Check       Check  `yaml:"check"`
 }
 
 func (s Service) SVCName() string {
@@ -95,6 +100,9 @@ func (f *File) Validate() error {
 		if err := validateLocal(s.Local); err != nil {
 			return fmt.Errorf("service %q: %w", s.Name, err)
 		}
+		if err := s.Launch.Validate(); err != nil {
+			return fmt.Errorf("service %q: %w", s.Name, err)
+		}
 	}
 	return nil
 }
@@ -152,20 +160,52 @@ func PortsEqual(a, b []string) bool {
 	return true
 }
 
-func (s Service) VIPService(endpoint string) tailscale.Service {
-	return tailscale.Service{
+// HostTags is the identity stamped on VIP Services so tagged hosts can
+// auto-approve via autoApprovers.services["tag:…"] (svc:* is not a valid key).
+func (f *File) HostTags() []string {
+	t := strings.TrimSpace(f.Access.AutoApproveHost)
+	if t == "" {
+		return nil
+	}
+	return []string{t}
+}
+
+func (s Service) VIPService(endpoint string, tags []string) tailscale.Service {
+	out := tailscale.Service{
 		Name:    s.SVCName(),
 		Comment: s.Comment,
 		Ports:   []string{endpoint},
 	}
+	if len(tags) > 0 {
+		out.Tags = append([]string(nil), tags...)
+	}
+	return out
 }
 
 func (f *File) VIPServices() []tailscale.Service {
+	tags := f.HostTags()
 	out := make([]tailscale.Service, 0, len(f.Services))
 	for _, s := range f.Services {
-		out = append(out, s.VIPService(f.Endpoint))
+		out = append(out, s.VIPService(f.Endpoint, tags))
 	}
 	return out
+}
+
+// HasAll reports whether have contains every string in want.
+func HasAll(have, want []string) bool {
+	if len(want) == 0 {
+		return true
+	}
+	set := make(map[string]struct{}, len(have))
+	for _, h := range have {
+		set[h] = struct{}{}
+	}
+	for _, w := range want {
+		if _, ok := set[w]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // ServeFile is the JSON document for `tailscale serve set-config`.

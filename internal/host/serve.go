@@ -33,6 +33,18 @@ func (c CLI) run(ctx context.Context, args ...string) ([]byte, error) {
 	return out, nil
 }
 
+// jsonPayload drops CLI stderr warnings mixed into CombinedOutput
+// (e.g. "Warning: client version ... != tailscaled ...").
+func jsonPayload(out []byte) []byte {
+	if i := bytes.IndexByte(out, '{'); i >= 0 {
+		return out[i:]
+	}
+	if i := bytes.IndexByte(out, '['); i >= 0 {
+		return out[i:]
+	}
+	return bytes.TrimSpace(out)
+}
+
 func (c CLI) GetConfig(ctx context.Context) (*catalog.ServeFile, error) {
 	out, err := c.run(ctx, "serve", "get-config", "--all")
 	if err != nil {
@@ -42,7 +54,7 @@ func (c CLI) GetConfig(ctx context.Context) (*catalog.ServeFile, error) {
 		}, nil
 	}
 	var cfg catalog.ServeFile
-	if err := json.Unmarshal(out, &cfg); err != nil {
+	if err := json.Unmarshal(jsonPayload(out), &cfg); err != nil {
 		return nil, fmt.Errorf("parse serve config: %w", err)
 	}
 	if cfg.Services == nil {
@@ -77,6 +89,11 @@ func (c CLI) Advertise(ctx context.Context, svc string) error {
 	return err
 }
 
+func (c CLI) Drain(ctx context.Context, svc string) error {
+	_, err := c.run(ctx, "serve", "drain", svc)
+	return err
+}
+
 type MagicDNS struct {
 	Suffix string
 }
@@ -92,7 +109,7 @@ func (c CLI) MagicDNS(ctx context.Context) (MagicDNS, error) {
 			MagicDNSSuffix string `json:"MagicDNSSuffix"`
 		} `json:"CurrentTailnet"`
 	}
-	if err := json.Unmarshal(out, &st); err != nil {
+	if err := json.Unmarshal(jsonPayload(out), &st); err != nil {
 		return MagicDNS{}, err
 	}
 	suf := st.MagicDNSSuffix

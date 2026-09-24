@@ -4,25 +4,41 @@
 # The app's localhost port never appears in DNS — the Service
 # endpoint is tcp:443; local is only the Serve backend.
 #
-#   tscatalog plan
+#   tscatalog up              start + publish + check
+#   tscatalog check
 #   tscatalog apply --dry-run
-#   tscatalog apply
 
 endpoint: tcp:443
 
 access:
   src: [autogroup:member]
-  # Tag on the machine that may auto-advertise svc:*. Replace with a tag
-  # from your tailnet policy; this tool does not apply ACLs.
+  # Tag on the host *and* on each VIP Service. autoApprovers uses this
+  # tag as the service selector (svc:* is not valid).
   autoApproveHost: tag:server
+  # Who may apply that tag. apply merges this into the live ACL
+  # (fills an empty tagOwners entry; does not remove other owners).
+  tagOwners: [autogroup:admin]
 
 services:
   - name: web
     displayName: Example web UI
     local: http://127.0.0.1:8080
     comment: HTTPS on 443, proxied to a local HTTP server
+    launch:
+      start: [my-web, start]
+      stop: [my-web, stop]
+    check:
+      path: /health
+      expect: [200]
+      public: [200]
 
   - name: api
     displayName: Example API
     local: http://127.0.0.1:8081
-    comment: Second service on the same host
+    comment: Second service on the same host; detach a long-running process
+    launch:
+      cwd: ~/src/api
+      start: [api, serve, --bind, 127.0.0.1:8081]
+      detach: true
+    check:
+      public: [200, 401]
