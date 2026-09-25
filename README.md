@@ -1,6 +1,10 @@
 # tscatalog
 
-Named Tailscale Services as code. Copy `catalog.example.yaml` to `catalog.yaml` (gitignored) and edit.
+Named Tailscale Services as code. Copy `catalog.example.yaml` to your catalog file and edit.
+
+Default catalog path: `$XDG_CONFIG_HOME/tscatalog/catalog.yaml` (or `~/.config/tscatalog/catalog.yaml`).
+Resolution order without `-f`: `TSCATALOG_CATALOG` → XDG config → `./catalog.yaml` in the current directory.
+Put a gitignored `.env` next to the catalog for API keys (see `.env.example`).
 The Go binary talks to the [VIP Services API](https://pkg.go.dev/tailscale.com/client/tailscale/v2#ServicesResource) (`tailscale.com/client/tailscale/v2`) and maps each service on this host with `tailscale serve --service --https`.
 
 Public URL is always `https://<tailscale-label>.<tailnet>.ts.net` on **443**.

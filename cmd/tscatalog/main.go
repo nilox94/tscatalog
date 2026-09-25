@@ -23,14 +23,17 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `tscatalog — named Tailscale Services as code
 
 Usage:
-  tscatalog plan    [-f catalog.yaml]
-  tscatalog apply   [-f catalog.yaml] [--dry-run] [--tailnet-only] [--host-only] [--policy-only] [--no-policy]
-  tscatalog start   [-f catalog.yaml] [name ...]
-  tscatalog stop    [-f catalog.yaml] [name ...]
-  tscatalog check   [-f catalog.yaml] [name ...]
-  tscatalog up      [-f catalog.yaml] [name ...] [--no-publish]
-  tscatalog status  [-f catalog.yaml]
-  tscatalog show    [-f catalog.yaml] [name ...]
+  tscatalog plan    [-f path]
+  tscatalog apply   [-f path] [--dry-run] [--tailnet-only] [--host-only] [--policy-only] [--no-policy]
+  tscatalog start   [-f path] [name ...]
+  tscatalog stop    [-f path] [name ...]
+  tscatalog check   [-f path] [name ...]
+  tscatalog up      [-f path] [name ...] [--no-publish]
+  tscatalog status  [-f path]
+  tscatalog show    [-f path] [name ...]
+
+Catalog file (when -f is omitted): TSCATALOG_CATALOG, then
+$XDG_CONFIG_HOME/tscatalog/catalog.yaml, then ./catalog.yaml.
 
 plan     Diff VIP Services, local Serve, and the tailnet ACL against the catalog.
 apply    PUT missing VIP Services (including host tag), serve --https for new
@@ -64,7 +67,7 @@ func main() {
 	}
 	cmd := os.Args[1]
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
-	file := fs.String("f", "catalog.yaml", "catalog file")
+	file := fs.String("f", "", "catalog file (default: auto-discover)")
 	dry := fs.Bool("dry-run", false, "print the plan and exit (apply)")
 	tailnetOnly := fs.Bool("tailnet-only", false, "only update VIP Services via the API")
 	hostOnly := fs.Bool("host-only", false, "only update local Serve mappings")
@@ -76,7 +79,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	catPath, err := filepath.Abs(*file)
+	catPath, err := catalog.ResolvePath(*file)
 	if err != nil {
 		fatal(err)
 	}

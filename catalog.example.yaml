@@ -1,4 +1,4 @@
-# Copy to catalog.yaml (gitignored) and edit.
+# Copy to ~/.config/tscatalog/catalog.yaml (or ./catalog.yaml) and edit.
 #
 # Public URL is always https://<tailscale-label>.<tailnet>.ts.net on 443.
 # Catalog name may contain dots; Tailscale VIP label defaults to hyphens (abc.xyz → abc-xyz) or set vip:.
