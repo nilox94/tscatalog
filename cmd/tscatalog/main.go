@@ -65,9 +65,33 @@ func newRootCmd() *cobra.Command {
 	}
 	root.PersistentFlags().StringVarP(&file, "file", "f", "", "catalog file (default: auto-discover)")
 
+	completeNames := func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		catPath, err := catalog.ResolvePath(file)
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		c, err := catalog.Load(catPath)
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		return shortNames(c), cobra.ShellCompDirectiveNoFileComp
+	}
+	named := func(use, short, long string, run func(context.Context, *catalog.File, []string) error) *cobra.Command {
+		return &cobra.Command{
+			Use:               use + " [name ...]",
+			Short:             short,
+			Long:              long,
+			ValidArgsFunction: completeNames,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return run(cmd.Context(), cat, args)
+			},
+		}
+	}
+
 	root.AddCommand(&cobra.Command{
 		Use:   "plan",
 		Short: "Diff VIP Services, local Serve, and the tailnet ACL against the catalog",
+		Long:  "Full catalog diff. Does not include local processes or health probes.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runPlan(cmd.Context(), cat)
@@ -76,19 +100,31 @@ func newRootCmd() *cobra.Command {
 
 	var dry, tailnetOnly, hostOnly, policyOnly, noPolicy bool
 	apply := &cobra.Command{
-		Use:   "apply",
-		Short: "Create VIP Services, Serve mappings, advertisements, and ACL entries",
-		Long: `PUT missing VIP Services (including host tag), serve --https for new
-host mappings, advertise each svc:*, and merge ACL tagOwners +
-autoApprovers by service tag (and grants if there is no catch-all).`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Use:   "apply [name ...]",
+		Short: "Reconcile VIP Services, Serve, advertisements, and the ACL",
+		Long: `Names limit VIP puts, Serve mappings, and steady-state advertise
+to those catalog services. The ACL merge is always the whole catalog.
+After an ACL write, every service is drained, re-served, and advertised
+so auto-approval can attach.
+
+No names means every catalog service. When the selected rows and the
+ACL are already in sync, apply prints "tailnet unchanged" and does not
+advertise.
+
+Arguments may be a catalog name, a vip label, or svc:<label>.`,
+		ValidArgsFunction: completeNames,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ids, err := catalogIDs(cat, args)
+			if err != nil {
+				return err
+			}
 			opts := syncer.Options{
 				DryRun:    dry,
 				Tailnet:   !hostOnly && !policyOnly,
 				Host:      !tailnetOnly && !policyOnly,
 				Advertise: !tailnetOnly && !policyOnly,
 				Policy:    (!noPolicy && !hostOnly && !tailnetOnly) || policyOnly,
+				Names:     ids,
 			}
 			return runApply(cmd.Context(), cat, opts)
 		},
@@ -104,53 +140,36 @@ autoApprovers by service tag (and grants if there is no catch-all).`,
 	apply.MarkFlagsMutuallyExclusive("policy-only", "no-policy")
 	root.AddCommand(apply)
 
-	named := func(use, short string, run func(context.Context, *catalog.File, []string) error) *cobra.Command {
-		return &cobra.Command{
-			Use:   use + " [name ...]",
-			Short: short,
-			ValidArgsFunction: func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
-				catPath, err := catalog.ResolvePath(file)
-				if err != nil {
-					return nil, cobra.ShellCompDirectiveNoFileComp
-				}
-				c, err := catalog.Load(catPath)
-				if err != nil {
-					return nil, cobra.ShellCompDirectiveNoFileComp
-				}
-				return shortNames(c), cobra.ShellCompDirectiveNoFileComp
-			},
-			RunE: func(cmd *cobra.Command, args []string) error {
-				return run(cmd.Context(), cat, args)
-			},
-		}
-	}
-	var repair bool
-	check := named("check", "Check TCP + HTTP locally, HTTPS on the named URL, and host approval", func(ctx context.Context, c *catalog.File, names []string) error {
-		return runCheckRepair(ctx, c, names, repair)
-	})
-	check.Flags().BoolVar(&repair, "repair", false, "start catalog launch for any service that fails the check")
-	root.AddCommand(
-		named("start", "Run each service's catalog launch and wait until the local bind is up", runStart),
-		named("stop", "Run catalog stop argv, or SIGTERM a process tscatalog detached", runStop),
-		check,
-		named("show", "Print services with catalog, VIP, Serve, and public URL", runShow),
-	)
-
-	var noPublish bool
-	up := named("up", "start, then apply (publish), then check", func(ctx context.Context, c *catalog.File, names []string) error {
-		return runUp(ctx, c, names, !noPublish)
-	})
-	up.Flags().BoolVar(&noPublish, "no-publish", false, "skip VIP/Serve/ACL apply")
-	root.AddCommand(up)
-
 	root.AddCommand(&cobra.Command{
-		Use:   "status",
-		Short: "List catalog rows with current API ports and Serve targets",
+		Use:   "list",
+		Short: "List catalog services with API ports and Serve targets",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runStatus(cmd.Context(), cat)
+			return runList(cmd.Context(), cat)
 		},
 	})
+
+	var localOnly bool
+	up := named("up", "Start selected services, reconcile the tailnet, then probe",
+		`Phases, in order: start catalog launch, apply, health.
+Names limit launch, VIP puts, Serve, steady-state advertise, and probes.
+The ACL merge is always the whole catalog. After an ACL write, every
+service is drained, re-served, and advertised.
+
+No names means every catalog service. --local skips apply.
+"Already listening" means the local port is open; up does not restart
+a process that still holds that port.`,
+		func(ctx context.Context, c *catalog.File, names []string) error {
+			return runUp(ctx, c, names, !localOnly)
+		})
+	up.Flags().BoolVar(&localOnly, "local", false, "start and probe only; skip VIP, Serve, advertise, and ACL")
+	root.AddCommand(
+		up,
+		named("stop", "Run catalog stop argv, or SIGTERM a process tscatalog detached", "", runStop),
+		named("health", "Probe TCP + HTTP locally, HTTPS on the public URL, and host approval", "", runHealth),
+		named("describe", "Print catalog services with VIP, Serve, approval, and public URL",
+			"Arguments may be a catalog name, a vip label, or svc:<label>.", runDescribe),
+	)
 	return root
 }
 
@@ -203,7 +222,7 @@ func runApply(ctx context.Context, cat *catalog.File, opts syncer.Options) error
 	return nil
 }
 
-func runStatus(ctx context.Context, cat *catalog.File) error {
+func runList(ctx context.Context, cat *catalog.File) error {
 	have, serve, err := snapshot(ctx, true, true)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "note: %v\n", err)
@@ -240,7 +259,7 @@ func runStatus(ctx context.Context, cat *catalog.File) error {
 	return nil
 }
 
-func runShow(ctx context.Context, cat *catalog.File, names []string) error {
+func runDescribe(ctx context.Context, cat *catalog.File, names []string) error {
 	svcs := cat.Services
 	if len(names) > 0 {
 		svcs = make([]catalog.Service, 0, len(names))
@@ -287,7 +306,11 @@ func shortNames(cat *catalog.File) []string {
 }
 
 func printShow(s catalog.Service, endpoint string, api tailscale.Service, serve *catalog.ServeFile, suffix, approval string) {
-	fmt.Printf("%s\n", s.SVCName())
+	fmt.Printf("%s\n", s.Name)
+	fmt.Printf("  svc       %s\n", s.SVCName())
+	if s.TailscaleLabel() != s.Name {
+		fmt.Printf("  vip       %s\n", s.TailscaleLabel())
+	}
 	if s.DisplayName != "" {
 		fmt.Printf("  display   %s\n", s.DisplayName)
 	}
@@ -391,6 +414,18 @@ func policyplan(cat *catalog.File, acl *tailscale.ACL) []policy.Change {
 	return policy.ComputePlan(policy.FromCatalog(cat), acl).Changes
 }
 
+func catalogIDs(cat *catalog.File, names []string) ([]string, error) {
+	svcs, err := selectServices(cat, names)
+	if err != nil || len(names) == 0 {
+		return nil, err
+	}
+	out := make([]string, len(svcs))
+	for i, s := range svcs {
+		out[i] = s.Name
+	}
+	return out, nil
+}
+
 func selectServices(cat *catalog.File, names []string) ([]catalog.Service, error) {
 	if len(names) == 0 {
 		return cat.Services, nil
@@ -414,7 +449,7 @@ func publicBase(ctx context.Context, name string) string {
 	return "https://" + name + "." + suffix
 }
 
-func runStart(ctx context.Context, cat *catalog.File, names []string) error {
+func runRuntime(ctx context.Context, cat *catalog.File, names []string) error {
 	svcs, err := selectServices(cat, names)
 	if err != nil {
 		return err
@@ -448,17 +483,13 @@ func runStop(ctx context.Context, cat *catalog.File, names []string) error {
 	return first
 }
 
-func runCheck(ctx context.Context, cat *catalog.File, names []string) error {
-	return runCheckRepair(ctx, cat, names, false)
-}
-
-func runCheckRepair(ctx context.Context, cat *catalog.File, names []string, repair bool) error {
+func runHealth(ctx context.Context, cat *catalog.File, names []string) error {
 	svcs, err := selectServices(cat, names)
 	if err != nil {
 		return err
 	}
 	fmt.Printf("%-14s %-8s %-10s %-10s %s\n", "SERVICE", "BIND", "LOCAL", "PUBLIC", "HOST")
-	var failed []catalog.Service
+	var failed int
 	for _, s := range svcs {
 		host := "-"
 		if hosts, err := tsapi.ListHosts(ctx, s.SVCName()); err == nil {
@@ -467,59 +498,28 @@ func runCheckRepair(ctx context.Context, cat *catalog.File, names []string, repa
 		r := lifecycle.Probe(ctx, s, publicBase(ctx, s.TailscaleLabel()), host)
 		fmt.Printf("%-14s %-8s %-10s %-10s %s\n", r.Name, r.Bind, r.Local, r.Public, r.Host)
 		if !r.OK {
-			failed = append(failed, s)
+			failed++
 		}
 	}
-	if len(failed) == 0 {
+	if failed == 0 {
 		return nil
 	}
-	if !repair {
-		return fmt.Errorf("%d service(s) unhealthy", len(failed))
-	}
-	var first error
-	for _, s := range failed {
-		if !s.Launch.Defined() {
-			fmt.Fprintf(os.Stderr, "%s: unhealthy and no launch in catalog (skipped)\n", s.Name)
-			if first == nil {
-				first = fmt.Errorf("%s: unhealthy", s.Name)
-			}
-			continue
-		}
-		fmt.Fprintf(os.Stderr, "%s: repairing…\n", s.Name)
-		if err := lifecycle.Start(ctx, s, os.Stdout); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			if first == nil {
-				first = err
-			}
-			continue
-		}
-		host := "-"
-		if hosts, err := tsapi.ListHosts(ctx, s.SVCName()); err == nil {
-			host = tsapi.ApprovalSummary(hosts)
-		}
-		r := lifecycle.Probe(ctx, s, publicBase(ctx, s.TailscaleLabel()), host)
-		fmt.Printf("%-14s %-8s %-10s %-10s %s  (after repair)\n", r.Name, r.Bind, r.Local, r.Public, r.Host)
-		if !r.OK && first == nil {
-			first = fmt.Errorf("%s: still unhealthy after repair", s.Name)
-		}
-	}
-	return first
+	return fmt.Errorf("%d service(s) unhealthy", failed)
 }
 
 func runUp(ctx context.Context, cat *catalog.File, names []string, publish bool) error {
-	if err := runStart(ctx, cat, names); err != nil {
+	if err := runRuntime(ctx, cat, names); err != nil {
 		return err
 	}
 	if publish {
-		opts := syncer.Options{Tailnet: true, Host: true, Advertise: true, Policy: true}
+		ids, err := catalogIDs(cat, names)
+		if err != nil {
+			return err
+		}
+		opts := syncer.Options{Tailnet: true, Host: true, Advertise: true, Policy: true, Names: ids}
 		if err := runApply(ctx, cat, opts); err != nil {
 			return err
 		}
 	}
-	return runCheck(ctx, cat, names)
-}
-
-func fatal(err error) {
-	fmt.Fprintln(os.Stderr, err)
-	os.Exit(1)
+	return runHealth(ctx, cat, names)
 }

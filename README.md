@@ -11,29 +11,31 @@ Public URL is always `https://<tailscale-label>.<tailnet>.ts.net` on **443**.
 Tailscale only accepts a single DNS label, so the VIP label defaults to dots → hyphens unless you set `vip:` explicitly.
 Local ports stay on loopback and never go in the Service definition.
 
+A catalog **name** is the key you pass to commands. **vip** is the single DNS label (default: dots in the name become hyphens). **svc:** is the Tailscale API name (`svc:` plus the vip label). Commands accept any of the three.
+
 ```
-go run ./cmd/tscatalog up                # start + publish + check
-go run ./cmd/tscatalog check
-go run ./cmd/tscatalog start open-design
-go run ./cmd/tscatalog stop open-design
+go run ./cmd/tscatalog up                # start + apply + health
+go run ./cmd/tscatalog up web --local    # start + health, no tailnet writes
+go run ./cmd/tscatalog health
+go run ./cmd/tscatalog stop web
 go run ./cmd/tscatalog plan
 go run ./cmd/tscatalog apply --dry-run
-go run ./cmd/tscatalog apply
-go run ./cmd/tscatalog status
-go run ./cmd/tscatalog show web
+go run ./cmd/tscatalog apply web
+go run ./cmd/tscatalog list
+go run ./cmd/tscatalog describe web
 ```
 
-`start` / `stop` / `check` / `up` read optional `launch` and `check` on each catalog row.
+`up`, `stop`, and `health` read optional `launch` and `check` on each catalog row.
 `launch.start` is argv (not a shell).
 A helper that returns when ready (`my-web start`, a service-manager installer) stays in the foreground.
-Long-running processes (`npm run dev`) set `detach: true` (Unix only): logs and pidfiles under `$XDG_STATE_HOME/tscatalog/` or `~/.local/state/tscatalog/` (`logs/` and `run/`). Without `detach`, `start` is a helper that returns when the listener is up (service manager, container, etc.); `stop` runs that helper’s stop argv.
+Long-running processes (`npm run dev`) set `detach: true` (Unix only): logs and pidfiles under `$XDG_STATE_HOME/tscatalog/` or `~/.local/state/tscatalog/` (`logs/` and `run/`). Without `detach`, launch is a helper that returns when the listener is up (service manager, container, etc.); `stop` runs that helper’s stop argv.
 Several specs (a list) start in order — UI + API on one named URL.
 
-`check` probes the local bind, optional local HTTP (`check.path` / `expect`), the public `https://<name>.<tailnet>.ts.net` URL (`check.public`, default 200/3xx), and Tailscale host approval.
+`health` probes the local bind, optional local HTTP (`check.path` / `expect`), the public `https://<vip>.<tailnet>.ts.net` URL (`check.public`, default 200/3xx), and Tailscale host approval.
 502 means Serve is up and the process is down.
 Timeout usually means the host is not approved.
 
-`up` is start → apply → check. `--no-publish` skips apply.
+`up` is launch → apply → health. Names limit launch, VIP puts, Serve, steady-state advertise, and probes. The ACL merge is always the whole catalog; after an ACL write, every service is drained and advertised. `--local` skips apply. A repeated `up` does not relaunch when something is already listening on `local`.
 
 Control-plane auth: `TAILSCALE_API_KEY` in the environment, or in a gitignored `.env` next to the catalog file (see `.env.example`).
 OAuth client id/secret also works.

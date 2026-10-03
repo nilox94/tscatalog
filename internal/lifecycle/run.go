@@ -57,7 +57,7 @@ func commandStop(spec catalog.LaunchSpec) *exec.Cmd {
 // Start runs each launch spec, then waits until the catalog local bind is ready.
 func Start(ctx context.Context, s catalog.Service, w io.Writer) error {
 	if !s.Launch.Defined() {
-		return fmt.Errorf("%s: no launch in catalog (start it yourself, then tscatalog check)", s.Name)
+		return fmt.Errorf("%s: no launch in catalog (start it yourself, then tscatalog health)", s.Name)
 	}
 	if LocalReady(ctx, s) {
 		fmt.Fprintf(w, "%s already listening on %s\n", s.Name, s.Local)

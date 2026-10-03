@@ -140,6 +140,38 @@ func TestLookup(t *testing.T) {
 	}
 }
 
+func TestLookupVIPAndSVCLabel(t *testing.T) {
+	f := &File{Services: []Service{
+		{Name: "abc.xyz", VIP: "docs", Local: "http://127.0.0.1:8080"},
+	}}
+	for _, q := range []string{"abc.xyz", "docs", "svc:docs", "svc:abc.xyz"} {
+		s, ok := f.Lookup(q)
+		if !ok || s.Name != "abc.xyz" {
+			t.Fatalf("lookup %q: ok=%v %+v", q, ok, s)
+		}
+	}
+}
+
+func TestRejectsDuplicateTailscaleLabel(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "catalog.yaml")
+	raw := []byte(`
+endpoint: tcp:443
+services:
+  - name: web
+    local: http://127.0.0.1:8080
+  - name: docs
+    vip: web
+    local: http://127.0.0.1:8081
+`)
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected duplicate label error")
+	}
+}
+
 func TestExampleCatalog(t *testing.T) {
 	f, err := Load(filepath.Join("..", "..", "catalog.example.yaml"))
 	if err != nil {

@@ -5,8 +5,8 @@
 # The app's localhost port never appears in DNS — the Service
 # endpoint is tcp:443; local is only the Serve backend.
 #
-#   tscatalog up              start + publish + check
-#   tscatalog check
+#   tscatalog up              launch + apply + health
+#   tscatalog health
 #   tscatalog apply --dry-run
 
 endpoint: tcp:443

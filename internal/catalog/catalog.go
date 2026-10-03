@@ -12,8 +12,10 @@ import (
 	"tailscale.com/client/tailscale/v2"
 )
 
-const DefaultEndpoint = "tcp:443"
-const ServeVersion = "0.0.1"
+const (
+	DefaultEndpoint = "tcp:443"
+	ServeVersion    = "0.0.1"
+)
 
 var labelRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
@@ -75,11 +77,15 @@ func CanonicalName(name string) string {
 	return strings.TrimPrefix(strings.TrimSpace(name), "svc:")
 }
 
-// Lookup returns the catalog service matching name or svc:name.
+// Lookup resolves a catalog name, a vip label, or svc: plus either label.
 func (f *File) Lookup(name string) (Service, bool) {
-	want := CanonicalName(name)
+	raw := strings.TrimSpace(name)
+	if raw == "" {
+		return Service{}, false
+	}
+	want := CanonicalName(raw)
 	for _, s := range f.Services {
-		if s.Name == want {
+		if s.Name == raw || s.Name == want || s.TailscaleLabel() == want {
 			return s, true
 		}
 	}
@@ -113,18 +119,24 @@ func (f *File) Validate() error {
 		return fmt.Errorf("catalog has no services")
 	}
 	seen := make(map[string]struct{}, len(f.Services))
+	seenLabel := make(map[string]string, len(f.Services))
 	for i := range f.Services {
 		s := &f.Services[i]
 		if !validServiceName(s.Name) {
 			return fmt.Errorf("service %q: name must be dot-separated DNS labels (lowercase, digits, hyphen)", s.Name)
 		}
-		if !labelRE.MatchString(s.TailscaleLabel()) {
-			return fmt.Errorf("service %q: tailscale label %q must be one DNS label (set vip:)", s.Name, s.TailscaleLabel())
+		label := s.TailscaleLabel()
+		if !labelRE.MatchString(label) {
+			return fmt.Errorf("service %q: tailscale label %q must be one DNS label (set vip:)", s.Name, label)
 		}
 		if _, ok := seen[s.Name]; ok {
 			return fmt.Errorf("duplicate service %q", s.Name)
 		}
 		seen[s.Name] = struct{}{}
+		if prev, ok := seenLabel[label]; ok {
+			return fmt.Errorf("service %q: tailscale label %q already used by %q", s.Name, label, prev)
+		}
+		seenLabel[label] = s.Name
 		if err := validateLocal(s.Local); err != nil {
 			return fmt.Errorf("service %q: %w", s.Name, err)
 		}

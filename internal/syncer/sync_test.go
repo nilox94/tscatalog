@@ -104,7 +104,20 @@ type fakeHost struct {
 	cfg        *catalog.ServeFile
 	served     []string
 	advertised []string
+	drained    []string
 }
+
+type fakePolicy struct {
+	acl *tailscale.ACL
+	set int
+}
+
+func (f *fakePolicy) Get(context.Context) (*tailscale.ACL, error) { return f.acl, nil }
+func (f *fakePolicy) Set(context.Context, tailscale.ACL, string) error {
+	f.set++
+	return nil
+}
+func (f *fakePolicy) Validate(context.Context, tailscale.ACL) error { return nil }
 
 func (f *fakeHost) GetConfig(context.Context) (*catalog.ServeFile, error) { return f.cfg, nil }
 func (f *fakeHost) Serve(_ context.Context, name, endpoint, local string) error {
@@ -115,7 +128,10 @@ func (f *fakeHost) Advertise(_ context.Context, svc string) error {
 	f.advertised = append(f.advertised, svc)
 	return nil
 }
-func (f *fakeHost) Drain(_ context.Context, svc string) error { return nil }
+func (f *fakeHost) Drain(_ context.Context, svc string) error {
+	f.drained = append(f.drained, svc)
+	return nil
+}
 
 func TestApplyWritesVIPAndServe(t *testing.T) {
 	want := sampleCatalog()
@@ -171,6 +187,79 @@ func TestApplySkipsUnchangedAndMergesTags(t *testing.T) {
 	}
 	if strings.Join(h.advertised, ",") != "svc:web,svc:api" {
 		t.Fatalf("advertise all catalog services: %v", h.advertised)
+	}
+}
+
+func TestApplyNameFilterSkipsSiblings(t *testing.T) {
+	want := sampleCatalog()
+	api := &fakeAPI{}
+	h := &fakeHost{cfg: &catalog.ServeFile{Services: map[string]catalog.ServeService{}}}
+	err := Apply(context.Background(), want, api, h, nil, Options{
+		Tailnet: true, Host: true, Advertise: true, Names: []string{"svc:web"},
+	}, ioDiscard())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(api.puts) != 1 || api.puts[0].Name != "svc:web" {
+		t.Fatalf("puts %+v", api.puts)
+	}
+	if strings.Join(h.served, "|") != "svc:web tcp:443 http://127.0.0.1:8080" {
+		t.Fatalf("served %v", h.served)
+	}
+	if strings.Join(h.advertised, ",") != "svc:web" {
+		t.Fatalf("advertised %v", h.advertised)
+	}
+}
+
+func TestApplyUnchangedSkipsAdvertise(t *testing.T) {
+	want := sampleCatalog()
+	api := &fakeAPI{have: []tailscale.Service{
+		{Name: "svc:web", Ports: []string{"tcp:443"}},
+		{Name: "svc:api", Ports: []string{"tcp:443"}},
+	}}
+	h := &fakeHost{cfg: want.ServeConfig()}
+	var buf bytes.Buffer
+	err := Apply(context.Background(), want, api, h, nil, Options{Tailnet: true, Host: true, Advertise: true}, &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(api.puts) != 0 || len(h.served) != 0 || len(h.advertised) != 0 {
+		t.Fatalf("puts %v served %v advertised %v", api.puts, h.served, h.advertised)
+	}
+	if !strings.Contains(buf.String(), "tailnet unchanged") {
+		t.Fatalf("output %q", buf.String())
+	}
+}
+
+func TestApplyPolicyChangeAdvertisesEveryService(t *testing.T) {
+	want := sampleCatalog()
+	want.Access.AutoApproveHost = "tag:server"
+	api := &fakeAPI{have: []tailscale.Service{
+		{Name: "svc:web", Ports: []string{"tcp:443"}, Tags: []string{"tag:server"}},
+		{Name: "svc:api", Ports: []string{"tcp:443"}, Tags: []string{"tag:server"}},
+	}}
+	h := &fakeHost{cfg: want.ServeConfig()}
+	pol := &fakePolicy{acl: &tailscale.ACL{}}
+	err := Apply(context.Background(), want, api, h, pol, Options{
+		Tailnet: true, Host: true, Advertise: true, Policy: true, Names: []string{"web"},
+	}, ioDiscard())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pol.set != 1 {
+		t.Fatalf("policy sets %d", pol.set)
+	}
+	if len(api.puts) != 0 {
+		t.Fatalf("vip puts %+v", api.puts)
+	}
+	if strings.Join(h.drained, ",") != "svc:web,svc:api" {
+		t.Fatalf("drained %v", h.drained)
+	}
+	if strings.Join(h.advertised, ",") != "svc:web,svc:api" {
+		t.Fatalf("advertised %v", h.advertised)
+	}
+	if strings.Join(h.served, "|") != "svc:web tcp:443 http://127.0.0.1:8080|svc:api tcp:443 http://127.0.0.1:8081" {
+		t.Fatalf("served %v", h.served)
 	}
 }
 

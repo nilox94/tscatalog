@@ -143,13 +143,17 @@ func ComputePlan(want *catalog.File, have []tailscale.Service, serve *catalog.Se
 }
 
 func FprintPlan(w io.Writer, p Plan) {
-	fmt.Fprintln(w, "tailnet (VIP Services API)")
-	for _, c := range p.Tailnet {
-		fmt.Fprintf(w, "  %-8s  %-18s  %s\n", c.Action, c.Name, c.Detail)
+	if len(p.Tailnet) > 0 {
+		fmt.Fprintln(w, "tailnet (VIP Services API)")
+		for _, c := range p.Tailnet {
+			fmt.Fprintf(w, "  %-8s  %-18s  %s\n", c.Action, c.Name, c.Detail)
+		}
 	}
-	fmt.Fprintln(w, "host (tailscale serve)")
-	for _, c := range p.Host {
-		fmt.Fprintf(w, "  %-8s  %-18s  %s\n", c.Action, c.Name, c.Detail)
+	if len(p.Host) > 0 {
+		fmt.Fprintln(w, "host (tailscale serve)")
+		for _, c := range p.Host {
+			fmt.Fprintf(w, "  %-8s  %-18s  %s\n", c.Action, c.Name, c.Detail)
+		}
 	}
 	if len(p.Policy) > 0 {
 		fmt.Fprintln(w, "policy (ACL)")
@@ -165,9 +169,20 @@ type Options struct {
 	Host      bool
 	Advertise bool
 	Policy    bool
+	// Names limits VIP puts, Serve, and steady-state advertise to these
+	// catalog names (or vip / svc: aliases). Empty means every service.
+	// ACL merge stays catalog-wide. After a policy write, every service
+	// is drained, re-served, and advertised.
+	Names []string
 }
 
 func Apply(ctx context.Context, want *catalog.File, api API, host Host, pol PolicyAPI, opts Options, w io.Writer) error {
+	names, err := canonicalNames(want, opts.Names)
+	if err != nil {
+		return err
+	}
+	opts.Names = names
+
 	if !opts.Tailnet && !opts.Host && !opts.Policy {
 		opts.Tailnet = true
 		opts.Host = true
@@ -205,7 +220,18 @@ func Apply(ctx context.Context, want *catalog.File, api API, host Host, pol Poli
 		}
 		plan.Policy = policy.ComputePlan(policy.FromCatalog(want), haveACL).Changes
 	}
-	FprintPlan(w, plan)
+	shown := filterPlan(want, plan, opts.Names)
+	if !opts.Tailnet {
+		shown.Tailnet = nil
+	}
+	if !opts.Host {
+		shown.Host = nil
+	}
+	if !scopeNeedsApply(want, plan, opts) {
+		fmt.Fprintln(w, "tailnet unchanged")
+		return nil
+	}
+	FprintPlan(w, shown)
 	if opts.DryRun {
 		return nil
 	}
@@ -243,7 +269,7 @@ func Apply(ctx context.Context, want *catalog.File, api API, host Host, pol Poli
 			byName[s.Name] = s
 		}
 		for i, s := range want.Services {
-			if plan.Tailnet[i].Action == "unchanged" {
+			if !selected(opts.Names, s.Name) || plan.Tailnet[i].Action == "unchanged" {
 				continue
 			}
 			desired := s.VIPService(want.Endpoint, want.HostTags())
@@ -260,23 +286,29 @@ func Apply(ctx context.Context, want *catalog.File, api API, host Host, pol Poli
 			return fmt.Errorf("local tailscale CLI required")
 		}
 		for i, s := range want.Services {
-			if plan.Host[i].Action != "unchanged" {
-				if err := host.Serve(ctx, s.SVCName(), want.Endpoint, s.Local); err != nil {
-					return fmt.Errorf("serve %s: %w", s.SVCName(), err)
+			inScope := selected(opts.Names, s.Name)
+			if inScope && plan.Host[i].Action != "unchanged" {
+				if err := serveOne(ctx, host, w, s, want.Endpoint); err != nil {
+					return err
 				}
-				fmt.Fprintf(w, "serve %s --https %s → %s\n", s.SVCName(), strings.TrimPrefix(want.Endpoint, "tcp:"), s.Local)
 			}
-			if opts.Advertise {
-				if policyChanged {
-					if err := host.Drain(ctx, s.SVCName()); err != nil {
-						return fmt.Errorf("drain %s: %w", s.SVCName(), err)
-					}
-					fmt.Fprintf(w, "drain %s\n", s.SVCName())
-					if err := host.Serve(ctx, s.SVCName(), want.Endpoint, s.Local); err != nil {
-						return fmt.Errorf("serve %s: %w", s.SVCName(), err)
-					}
-					fmt.Fprintf(w, "serve %s --https %s → %s\n", s.SVCName(), strings.TrimPrefix(want.Endpoint, "tcp:"), s.Local)
+			// An ACL write has to re-attach every service, not only the names
+			// on the command line, or auto-approval never lands on siblings.
+			if policyChanged && opts.Advertise {
+				if err := host.Drain(ctx, s.SVCName()); err != nil {
+					return fmt.Errorf("drain %s: %w", s.SVCName(), err)
 				}
+				fmt.Fprintf(w, "drain %s\n", s.SVCName())
+				if err := serveOne(ctx, host, w, s, want.Endpoint); err != nil {
+					return err
+				}
+				if err := host.Advertise(ctx, s.SVCName()); err != nil {
+					return fmt.Errorf("advertise %s: %w", s.SVCName(), err)
+				}
+				fmt.Fprintf(w, "advertise %s\n", s.SVCName())
+				continue
+			}
+			if inScope && opts.Advertise {
 				if err := host.Advertise(ctx, s.SVCName()); err != nil {
 					return fmt.Errorf("advertise %s: %w", s.SVCName(), err)
 				}
@@ -285,6 +317,89 @@ func Apply(ctx context.Context, want *catalog.File, api API, host Host, pol Poli
 		}
 	}
 	return nil
+}
+
+func serveOne(ctx context.Context, host Host, w io.Writer, s catalog.Service, endpoint string) error {
+	if err := host.Serve(ctx, s.SVCName(), endpoint, s.Local); err != nil {
+		return fmt.Errorf("serve %s: %w", s.SVCName(), err)
+	}
+	fmt.Fprintf(w, "serve %s --https %s → %s\n", s.SVCName(), strings.TrimPrefix(endpoint, "tcp:"), s.Local)
+	return nil
+}
+
+func canonicalNames(want *catalog.File, names []string) ([]string, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	out := make([]string, 0, len(names))
+	seen := map[string]struct{}{}
+	for _, name := range names {
+		s, ok := want.Lookup(name)
+		if !ok {
+			return nil, fmt.Errorf("unknown service %q", name)
+		}
+		if _, ok := seen[s.Name]; ok {
+			continue
+		}
+		seen[s.Name] = struct{}{}
+		out = append(out, s.Name)
+	}
+	return out, nil
+}
+
+func selected(names []string, name string) bool {
+	if len(names) == 0 {
+		return true
+	}
+	for _, n := range names {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
+func scopeNeedsApply(want *catalog.File, plan Plan, opts Options) bool {
+	for i, s := range want.Services {
+		if !selected(opts.Names, s.Name) {
+			continue
+		}
+		if opts.Tailnet && i < len(plan.Tailnet) && plan.Tailnet[i].Action != "unchanged" {
+			return true
+		}
+		if opts.Host && i < len(plan.Host) && plan.Host[i].Action != "unchanged" {
+			return true
+		}
+	}
+	if opts.Policy {
+		for _, c := range plan.Policy {
+			if c.Action != "unchanged" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func filterPlan(want *catalog.File, plan Plan, names []string) Plan {
+	out := Plan{Policy: plan.Policy}
+	if len(names) == 0 {
+		out.Tailnet = plan.Tailnet
+		out.Host = plan.Host
+		return out
+	}
+	for i, s := range want.Services {
+		if !selected(names, s.Name) {
+			continue
+		}
+		if i < len(plan.Tailnet) {
+			out.Tailnet = append(out.Tailnet, plan.Tailnet[i])
+		}
+		if i < len(plan.Host) {
+			out.Host = append(out.Host, plan.Host[i])
+		}
+	}
+	return out
 }
 
 func mergeForPut(desired, existing tailscale.Service) tailscale.Service {
