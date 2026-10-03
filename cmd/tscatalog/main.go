@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 
 	"charm.land/fang/v2"
@@ -18,6 +21,7 @@ import (
 	"tscatalog/internal/host"
 	"tscatalog/internal/lifecycle"
 	"tscatalog/internal/policy"
+	"tscatalog/internal/style"
 	"tscatalog/internal/syncer"
 	"tscatalog/internal/tsapi"
 )
@@ -189,7 +193,7 @@ func runPlan(ctx context.Context, cat *catalog.File) error {
 	} else {
 		p.Policy = policyplan(cat, acl)
 	}
-	syncer.FprintPlan(os.Stdout, p)
+	syncer.FprintPlan(style.Writer(os.Stdout), p)
 	printURLs(ctx, cat)
 	return nil
 }
@@ -213,7 +217,7 @@ func runApply(ctx context.Context, cat *catalog.File, opts syncer.Options) error
 	if opts.Host {
 		h = host.CLI{}
 	}
-	if err := syncer.Apply(ctx, cat, api, h, pol, opts, os.Stdout); err != nil {
+	if err := syncer.Apply(ctx, cat, api, h, pol, opts, style.Writer(os.Stdout)); err != nil {
 		return err
 	}
 	if !opts.DryRun {
@@ -231,7 +235,8 @@ func runList(ctx context.Context, cat *catalog.File) error {
 	for _, s := range have {
 		byName[s.Name] = s.Ports
 	}
-	fmt.Printf("%-14s %-10s %-28s %s\n", "SERVICE", "API PORTS", "SERVE", "URL")
+	w := style.Writer(os.Stdout)
+	fmt.Fprintf(w, "%-14s %-10s %-28s %s\n", "SERVICE", "API PORTS", "SERVE", "URL")
 	suffix := magicSuffix(ctx)
 	for _, s := range cat.Services {
 		apiPorts := "-"
@@ -254,7 +259,17 @@ func runList(ctx context.Context, cat *catalog.File) error {
 		if suffix != "" {
 			url = "https://" + s.TailscaleLabel() + "." + suffix
 		}
-		fmt.Printf("%-14s %-10s %-28s %s\n", s.Name, apiPorts, serveT, url)
+		serveCell := fmt.Sprintf("%-28s", serveT)
+		if serveT == "-" {
+			serveCell = style.Faint(serveCell)
+		}
+		fmt.Fprintf(
+			w, "%s %s %s %s\n",
+			style.Bold(fmt.Sprintf("%-14s", s.Name)),
+			fmt.Sprintf("%-10s", apiPorts),
+			serveCell,
+			style.Faint(url),
+		)
 	}
 	return nil
 }
@@ -292,7 +307,7 @@ func runDescribe(ctx context.Context, cat *catalog.File, names []string) error {
 		} else {
 			approval = tsapi.ApprovalSummary(hosts)
 		}
-		printShow(s, cat.Endpoint, byName[s.SVCName()], serve, suffix, approval)
+		printShow(style.Writer(os.Stdout), s, cat.Endpoint, byName[s.SVCName()], serve, suffix, approval)
 	}
 	return nil
 }
@@ -305,27 +320,33 @@ func shortNames(cat *catalog.File) []string {
 	return out
 }
 
-func printShow(s catalog.Service, endpoint string, api tailscale.Service, serve *catalog.ServeFile, suffix, approval string) {
-	fmt.Printf("%s\n", s.Name)
-	fmt.Printf("  svc       %s\n", s.SVCName())
+func printShow(w io.Writer, s catalog.Service, endpoint string, api tailscale.Service, serve *catalog.ServeFile, suffix, approval string) {
+	fmt.Fprintln(w, style.Bold(s.Name))
+	field(w, "svc", s.SVCName())
 	if s.TailscaleLabel() != s.Name {
-		fmt.Printf("  vip       %s\n", s.TailscaleLabel())
+		field(w, "vip", s.TailscaleLabel())
 	}
 	if s.DisplayName != "" {
-		fmt.Printf("  display   %s\n", s.DisplayName)
+		field(w, "display", s.DisplayName)
 	}
 	if s.Comment != "" {
-		fmt.Printf("  comment   %s\n", s.Comment)
+		field(w, "comment", s.Comment)
+	}
+	if len(s.Requires) > 0 {
+		field(w, "requires", strings.Join(s.Requires, ", "))
+	}
+	if s.Unpublished {
+		field(w, "publish", style.Faint("loopback only (unpublished)"))
 	}
 	url := "https://" + s.TailscaleLabel() + ".<tailnet>.ts.net"
 	if suffix != "" {
 		url = "https://" + s.TailscaleLabel() + "." + suffix
 	}
-	fmt.Printf("  url       %s\n", url)
-	fmt.Printf("  catalog   %s → %s\n", endpoint, s.Local)
+	field(w, "url", style.Faint(url))
+	field(w, "catalog", endpoint+" → "+s.Local)
 
 	if api.Name == "" {
-		fmt.Printf("  api       (not defined)\n")
+		field(w, "api", style.Faint("(not defined)"))
 	} else {
 		ports := strings.Join(api.Ports, ",")
 		if ports == "" {
@@ -333,16 +354,16 @@ func printShow(s catalog.Service, endpoint string, api tailscale.Service, serve 
 		}
 		addrs := strings.Join(api.Addrs, ", ")
 		if addrs == "" {
-			fmt.Printf("  api       ports=%s\n", ports)
+			field(w, "api", "ports="+ports)
 		} else {
-			fmt.Printf("  api       ports=%s  addrs=%s\n", ports, addrs)
+			field(w, "api", fmt.Sprintf("ports=%s  addrs=%s", ports, addrs))
 		}
 		if len(api.Tags) > 0 {
-			fmt.Printf("  tags      %s\n", strings.Join(api.Tags, ", "))
+			field(w, "tags", strings.Join(api.Tags, ", "))
 		}
 	}
 
-	serveT := "(not mapped)"
+	serveT := style.Faint("(not mapped)")
 	if serve != nil {
 		if ep, ok := serve.Services[s.SVCName()]; ok {
 			if v := ep.Endpoints[endpoint]; v != "" {
@@ -356,10 +377,14 @@ func printShow(s catalog.Service, endpoint string, api tailscale.Service, serve 
 			}
 		}
 	}
-	fmt.Printf("  serve     %s\n", serveT)
+	field(w, "serve", serveT)
 	if approval != "" {
-		fmt.Printf("  host      %s\n", approval)
+		field(w, "host", style.Host(approval))
 	}
+}
+
+func field(w io.Writer, key, value string) {
+	fmt.Fprintf(w, "  %s%s\n", style.Faint(fmt.Sprintf("%-10s", key)), value)
 }
 
 func snapshot(ctx context.Context, wantAPI, wantHost bool) ([]tailscale.Service, *catalog.ServeFile, error) {
@@ -391,14 +416,18 @@ func snapshot(ctx context.Context, wantAPI, wantHost bool) ([]tailscale.Service,
 }
 
 func printURLs(ctx context.Context, cat *catalog.File) {
+	w := style.Writer(os.Stdout)
 	suffix := magicSuffix(ctx)
 	if suffix == "" {
-		fmt.Println("public: https://<name>.<tailnet>.ts.net")
+		fmt.Fprintln(w, style.Faint("public: https://<name>.<tailnet>.ts.net"))
 		return
 	}
-	fmt.Println("public URLs")
+	fmt.Fprintln(w, style.Bold("public URLs"))
 	for _, s := range cat.Services {
-		fmt.Printf("  https://%s.%s\n", s.TailscaleLabel(), suffix)
+		if !s.Published() {
+			continue
+		}
+		fmt.Fprintf(w, "  %s\n", style.Faint("https://"+s.TailscaleLabel()+"."+suffix))
 	}
 }
 
@@ -450,13 +479,13 @@ func publicBase(ctx context.Context, name string) string {
 }
 
 func runRuntime(ctx context.Context, cat *catalog.File, names []string) error {
-	svcs, err := selectServices(cat, names)
+	svcs, err := cat.ExpandForRuntime(names)
 	if err != nil {
 		return err
 	}
 	var first error
 	for _, s := range svcs {
-		if err := lifecycle.Start(ctx, s, os.Stdout); err != nil {
+		if err := lifecycle.Start(ctx, s, style.Writer(os.Stdout)); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			if first == nil {
 				first = err
@@ -473,7 +502,7 @@ func runStop(ctx context.Context, cat *catalog.File, names []string) error {
 	}
 	var first error
 	for _, s := range svcs {
-		if err := lifecycle.Stop(ctx, s, os.Stdout); err != nil {
+		if err := lifecycle.Stop(ctx, s, style.Writer(os.Stdout)); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			if first == nil {
 				first = err
@@ -484,19 +513,35 @@ func runStop(ctx context.Context, cat *catalog.File, names []string) error {
 }
 
 func runHealth(ctx context.Context, cat *catalog.File, names []string) error {
-	svcs, err := selectServices(cat, names)
+	svcs, err := cat.ExpandForRuntime(names)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%-14s %-8s %-10s %-10s %s\n", "SERVICE", "BIND", "LOCAL", "PUBLIC", "HOST")
+	w := style.Writer(os.Stdout)
+	fmt.Fprintf(w, "%-14s %-8s %-10s %-10s %s\n", "SERVICE", "BIND", "LOCAL", "PUBLIC", "HOST")
 	var failed int
 	for _, s := range svcs {
 		host := "-"
-		if hosts, err := tsapi.ListHosts(ctx, s.SVCName()); err == nil {
-			host = tsapi.ApprovalSummary(hosts)
+		if s.Published() {
+			if hosts, err := tsapi.ListHosts(ctx, s.SVCName()); err == nil {
+				host = tsapi.ApprovalSummary(hosts)
+			}
+		} else {
+			host = "local"
 		}
-		r := lifecycle.Probe(ctx, s, publicBase(ctx, s.TailscaleLabel()), host)
-		fmt.Printf("%-14s %-8s %-10s %-10s %s\n", r.Name, r.Bind, r.Local, r.Public, r.Host)
+		pub := publicBase(ctx, s.TailscaleLabel())
+		if !s.Published() {
+			pub = ""
+		}
+		r := lifecycle.Probe(ctx, s, pub, host)
+		fmt.Fprintf(
+			w, "%s %s %s %s %s\n",
+			fmt.Sprintf("%-14s", r.Name),
+			style.Probe(8, r.Bind, bindOK(r.Bind)),
+			style.Probe(10, r.Local, probeOK(r.Local, s.Check.LocalExpect())),
+			style.Probe(10, r.Public, probeOK(r.Public, s.Check.PublicExpect())),
+			style.Host(r.Host),
+		)
 		if !r.OK {
 			failed++
 		}
@@ -505,6 +550,27 @@ func runHealth(ctx context.Context, cat *catalog.File, names []string) error {
 		return nil
 	}
 	return fmt.Errorf("%d service(s) unhealthy", failed)
+}
+
+func bindOK(value string) bool {
+	return value != "" && value != "down" && value != "error"
+}
+
+func probeOK(value string, expect []int) bool {
+	switch value {
+	case "down", "error", "timeout", "refused":
+		return false
+	case "tcp":
+		return true
+	}
+	code, err := strconv.Atoi(value)
+	if err != nil {
+		return false
+	}
+	if len(expect) == 0 {
+		return code >= 200 && code < 400
+	}
+	return slices.Contains(expect, code)
 }
 
 func runUp(ctx context.Context, cat *catalog.File, names []string, publish bool) error {

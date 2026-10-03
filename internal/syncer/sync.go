@@ -10,6 +10,7 @@ import (
 
 	"tscatalog/internal/catalog"
 	"tscatalog/internal/policy"
+	"tscatalog/internal/style"
 )
 
 type API interface {
@@ -96,6 +97,19 @@ func ComputePlan(want *catalog.File, have []tailscale.Service, serve *catalog.Se
 	}
 	var p Plan
 	for _, s := range want.Services {
+		if !s.Published() {
+			p.Tailnet = append(p.Tailnet, Change{
+				Name:   s.SVCName(),
+				Action: "unchanged",
+				Detail: "unpublished",
+			})
+			p.Host = append(p.Host, Change{
+				Name:   s.SVCName(),
+				Action: "unchanged",
+				Detail: "unpublished (loopback only)",
+			})
+			continue
+		}
 		desired := s.VIPService(want.Endpoint, want.HostTags())
 		cur, ok := byName[desired.Name]
 		ch := Change{Name: desired.Name}
@@ -144,21 +158,21 @@ func ComputePlan(want *catalog.File, have []tailscale.Service, serve *catalog.Se
 
 func FprintPlan(w io.Writer, p Plan) {
 	if len(p.Tailnet) > 0 {
-		fmt.Fprintln(w, "tailnet (VIP Services API)")
+		fmt.Fprintln(w, style.Bold("tailnet (VIP Services API)"))
 		for _, c := range p.Tailnet {
-			fmt.Fprintf(w, "  %-8s  %-18s  %s\n", c.Action, c.Name, c.Detail)
+			fmt.Fprintf(w, "  %s  %-18s  %s\n", style.Action(c.Action), c.Name, c.Detail)
 		}
 	}
 	if len(p.Host) > 0 {
-		fmt.Fprintln(w, "host (tailscale serve)")
+		fmt.Fprintln(w, style.Bold("host (tailscale serve)"))
 		for _, c := range p.Host {
-			fmt.Fprintf(w, "  %-8s  %-18s  %s\n", c.Action, c.Name, c.Detail)
+			fmt.Fprintf(w, "  %s  %-18s  %s\n", style.Action(c.Action), c.Name, c.Detail)
 		}
 	}
 	if len(p.Policy) > 0 {
-		fmt.Fprintln(w, "policy (ACL)")
+		fmt.Fprintln(w, style.Bold("policy (ACL)"))
 		for _, c := range p.Policy {
-			fmt.Fprintf(w, "  %-8s  %-28s  %s\n", c.Action, c.Name, c.Detail)
+			fmt.Fprintf(w, "  %s  %-28s  %s\n", style.Action(c.Action), c.Name, c.Detail)
 		}
 	}
 }
@@ -228,7 +242,7 @@ func Apply(ctx context.Context, want *catalog.File, api API, host Host, pol Poli
 		shown.Host = nil
 	}
 	if !scopeNeedsApply(want, plan, opts) {
-		fmt.Fprintln(w, "tailnet unchanged")
+		fmt.Fprintln(w, style.Faint("tailnet unchanged"))
 		return nil
 	}
 	FprintPlan(w, shown)
@@ -242,7 +256,7 @@ func Apply(ctx context.Context, want *catalog.File, api API, host Host, pol Poli
 			return fmt.Errorf("policy API client required")
 		}
 		if !policy.ComputePlan(policy.FromCatalog(want), haveACL).NeedsApply() {
-			fmt.Fprintln(w, "policy unchanged")
+			fmt.Fprintln(w, style.Faint("policy unchanged"))
 		} else {
 			merged := policy.Merge(haveACL, policy.FromCatalog(want))
 			if err := pol.Validate(ctx, *merged); err != nil {
@@ -256,7 +270,7 @@ func Apply(ctx context.Context, want *catalog.File, api API, host Host, pol Poli
 				return fmt.Errorf("set ACL: %w", err)
 			}
 			policyChanged = true
-			fmt.Fprintln(w, "policy merged (tagOwners, autoApprovers; grants only if no catch-all)")
+			fmt.Fprintln(w, style.Warn("policy merged (tagOwners, autoApprovers; grants only if no catch-all)"))
 		}
 	}
 
@@ -269,6 +283,9 @@ func Apply(ctx context.Context, want *catalog.File, api API, host Host, pol Poli
 			byName[s.Name] = s
 		}
 		for i, s := range want.Services {
+			if !s.Published() {
+				continue
+			}
 			if !selected(opts.Names, s.Name) || plan.Tailnet[i].Action == "unchanged" {
 				continue
 			}
@@ -287,6 +304,9 @@ func Apply(ctx context.Context, want *catalog.File, api API, host Host, pol Poli
 		}
 		for i, s := range want.Services {
 			inScope := selected(opts.Names, s.Name)
+			if !s.Published() {
+				continue
+			}
 			if inScope && plan.Host[i].Action != "unchanged" {
 				if err := serveOne(ctx, host, w, s, want.Endpoint); err != nil {
 					return err
@@ -295,6 +315,9 @@ func Apply(ctx context.Context, want *catalog.File, api API, host Host, pol Poli
 			// An ACL write has to re-attach every service, not only the names
 			// on the command line, or auto-approval never lands on siblings.
 			if policyChanged && opts.Advertise {
+				if !s.Published() {
+					continue
+				}
 				if err := host.Drain(ctx, s.SVCName()); err != nil {
 					return fmt.Errorf("drain %s: %w", s.SVCName(), err)
 				}

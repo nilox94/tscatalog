@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"tscatalog/internal/catalog"
+	"tscatalog/internal/style"
 )
 
 const defaultWait = 45 * time.Second
@@ -60,7 +61,7 @@ func Start(ctx context.Context, s catalog.Service, w io.Writer) error {
 		return fmt.Errorf("%s: no launch in catalog (start it yourself, then tscatalog health)", s.Name)
 	}
 	if LocalReady(ctx, s) {
-		fmt.Fprintf(w, "%s already listening on %s\n", s.Name, s.Local)
+		fmt.Fprintf(w, "%s %s on %s\n", s.Name, style.Faint("already listening"), s.Local)
 		return nil
 	}
 	for i, spec := range s.Launch {
@@ -84,7 +85,7 @@ func Start(ctx context.Context, s catalog.Service, w io.Writer) error {
 	deadline := time.Now().Add(defaultWait)
 	for {
 		if LocalReady(ctx, s) {
-			fmt.Fprintf(w, "%s ready on %s\n", s.Name, s.Local)
+			fmt.Fprintf(w, "%s %s %s\n", s.Name, style.Good("ready on"), s.Local)
 			return nil
 		}
 		if time.Now().After(deadline) {

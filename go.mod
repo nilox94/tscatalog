@@ -4,14 +4,14 @@ go 1.25.0
 
 require (
 	charm.land/fang/v2 v2.0.1
+	charm.land/lipgloss/v2 v2.0.1
+	github.com/charmbracelet/colorprofile v0.4.2
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1
 	tailscale.com/client/tailscale/v2 v2.10.1
 )
 
 require (
-	charm.land/lipgloss/v2 v2.0.1 // indirect
-	github.com/charmbracelet/colorprofile v0.4.2 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20260205113103-524a6607adb8 // indirect
 	github.com/charmbracelet/x/ansi v0.11.6 // indirect
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20250603201427-c31516f43444 // indirect

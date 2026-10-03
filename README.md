@@ -31,6 +31,14 @@ A helper that returns when ready (`my-web start`, a service-manager installer) s
 Long-running processes (`npm run dev`) set `detach: true` (Unix only): logs and pidfiles under `$XDG_STATE_HOME/tscatalog/` or `~/.local/state/tscatalog/` (`logs/` and `run/`). Without `detach`, launch is a helper that returns when the listener is up (service manager, container, etc.); `stop` runs that helper’s stop argv.
 Several specs (a list) start in order — UI + API on one named URL.
 
+`requires` lists other catalog names that must be running first. `up momoma` starts
+those dependencies locally, then Momoma, but only publishes and probes the names you
+gave (dependencies are not advertised). `stop momoma` stops only Momoma — shared
+dependencies keep running.
+
+`unpublished: true` keeps a row in the catalog for launch and health, but skips VIP,
+Serve, advertise, and ACL grants (loopback-only observability stacks).
+
 `health` probes the local bind, optional local HTTP (`check.path` / `expect`), the public `https://<vip>.<tailnet>.ts.net` URL (`check.public`, default 200/3xx), and Tailscale host approval.
 502 means Serve is up and the process is down.
 Timeout usually means the host is not approved.

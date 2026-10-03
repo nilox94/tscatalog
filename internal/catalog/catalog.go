@@ -47,13 +47,15 @@ type Access struct {
 }
 
 type Service struct {
-	Name        string `yaml:"name"`
-	VIP         string `yaml:"vip,omitempty"`
-	DisplayName string `yaml:"displayName"`
-	Local       string `yaml:"local"`
-	Comment     string `yaml:"comment"`
-	Launch      Launch `yaml:"launch"`
-	Check       Check  `yaml:"check"`
+	Name         string   `yaml:"name"`
+	VIP          string   `yaml:"vip,omitempty"`
+	DisplayName  string   `yaml:"displayName"`
+	Local        string   `yaml:"local"`
+	Comment      string   `yaml:"comment"`
+	Requires     []string `yaml:"requires,omitempty"`
+	Unpublished  bool     `yaml:"unpublished,omitempty"`
+	Launch       Launch   `yaml:"launch"`
+	Check        Check    `yaml:"check"`
 }
 
 // TailscaleLabel is the single DNS label used for svc:* and https://<label>.<tailnet>.ts.net.
@@ -144,7 +146,7 @@ func (f *File) Validate() error {
 			return fmt.Errorf("service %q: %w", s.Name, err)
 		}
 	}
-	return nil
+	return validateRequires(f)
 }
 
 func validateLocal(local string) error {
@@ -226,6 +228,9 @@ func (f *File) VIPServices() []tailscale.Service {
 	tags := f.HostTags()
 	out := make([]tailscale.Service, 0, len(f.Services))
 	for _, s := range f.Services {
+		if !s.Published() {
+			continue
+		}
 		out = append(out, s.VIPService(f.Endpoint, tags))
 	}
 	return out
@@ -264,6 +269,9 @@ func (f *File) ServeConfig() *ServeFile {
 		Services: make(map[string]ServeService, len(f.Services)),
 	}
 	for _, s := range f.Services {
+		if !s.Published() {
+			continue
+		}
 		out.Services[s.SVCName()] = ServeService{
 			Endpoints: map[string]string{f.Endpoint: s.Local},
 		}

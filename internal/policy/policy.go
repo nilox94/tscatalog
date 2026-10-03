@@ -35,6 +35,9 @@ func FromCatalog(f *catalog.File) Desired {
 		d.TagOwners = []string{defaultTagOwner}
 	}
 	for _, s := range f.Services {
+		if !s.Published() {
+			continue
+		}
 		d.GrantDst = append(d.GrantDst, s.SVCName())
 	}
 	return d
