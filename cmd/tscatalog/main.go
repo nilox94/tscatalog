@@ -7,8 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
-	"strconv"
 	"strings"
 
 	"charm.land/fang/v2"
@@ -538,8 +536,8 @@ func runHealth(ctx context.Context, cat *catalog.File, names []string) error {
 			w, "%s %s %s %s %s\n",
 			fmt.Sprintf("%-14s", r.Name),
 			style.Probe(8, r.Bind, bindOK(r.Bind)),
-			style.Probe(10, r.Local, probeOK(r.Local, s.Check.LocalExpect())),
-			style.Probe(10, r.Public, probeOK(r.Public, s.Check.PublicExpect())),
+			style.Probe(10, r.Local, lifecycle.ValueOK(r.Local, s.Check.LocalExpect())),
+			style.Probe(10, r.Public, lifecycle.ValueOK(r.Public, s.Check.PublicExpect())),
 			style.Host(r.Host),
 		)
 		if !r.OK {
@@ -554,23 +552,6 @@ func runHealth(ctx context.Context, cat *catalog.File, names []string) error {
 
 func bindOK(value string) bool {
 	return value != "" && value != "down" && value != "error"
-}
-
-func probeOK(value string, expect []int) bool {
-	switch value {
-	case "down", "error", "timeout", "refused":
-		return false
-	case "tcp":
-		return true
-	}
-	code, err := strconv.Atoi(value)
-	if err != nil {
-		return false
-	}
-	if len(expect) == 0 {
-		return code >= 200 && code < 400
-	}
-	return slices.Contains(expect, code)
 }
 
 func runUp(ctx context.Context, cat *catalog.File, names []string, publish bool) error {

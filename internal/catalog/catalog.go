@@ -47,15 +47,15 @@ type Access struct {
 }
 
 type Service struct {
-	Name         string   `yaml:"name"`
-	VIP          string   `yaml:"vip,omitempty"`
-	DisplayName  string   `yaml:"displayName"`
-	Local        string   `yaml:"local"`
-	Comment      string   `yaml:"comment"`
-	Requires     []string `yaml:"requires,omitempty"`
-	Unpublished  bool     `yaml:"unpublished,omitempty"`
-	Launch       Launch   `yaml:"launch"`
-	Check        Check    `yaml:"check"`
+	Name        string   `yaml:"name"`
+	VIP         string   `yaml:"vip,omitempty"`
+	DisplayName string   `yaml:"displayName"`
+	Local       string   `yaml:"local"`
+	Comment     string   `yaml:"comment"`
+	Requires    []string `yaml:"requires,omitempty"`
+	Unpublished bool     `yaml:"unpublished,omitempty"`
+	Launch      Launch   `yaml:"launch"`
+	Check       Check    `yaml:"check"`
 }
 
 // TailscaleLabel is the single DNS label used for svc:* and https://<label>.<tailnet>.ts.net.

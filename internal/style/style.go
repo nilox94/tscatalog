@@ -38,6 +38,18 @@ func Good(s string) string { return good.Render(s) }
 // Warn marks a change that is not a failure.
 func Warn(s string) string { return warn.Render(s) }
 
+// Bad marks a failed probe or a process that is down.
+func Bad(s string) string { return bad.Render(s) }
+
+// Bar paints the selected row. width pads the line so the highlight is a full bar.
+func Bar(s string, width int) string {
+	st := lipgloss.NewStyle().Reverse(true)
+	if width > 0 {
+		st = st.Width(width)
+	}
+	return st.Render(s)
+}
+
 // Action pads a plan action to 8 columns, then colors the padded cell.
 // Padding comes first so ANSI codes do not shift the column.
 func Action(action string) string {

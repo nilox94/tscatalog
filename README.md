@@ -23,7 +23,10 @@ go run ./cmd/tscatalog apply --dry-run
 go run ./cmd/tscatalog apply web
 go run ./cmd/tscatalog list
 go run ./cmd/tscatalog describe web
+go run ./cmd/cat9s
 ```
+
+`cat9s` is a separate full-screen browser. Published services that are down or unhealthy are listed first, with a count of how many need a restart. `/` filters by name. `r` restarts the selected service and `R` restarts every visible one in that set. A dead process is started. A process that is listening but failing its local check is stopped and started only when this catalog launched it (a stop argv, or a live detached pid). A port held by something else is left alone. Host `not-approved` or `draining` is not a restart. `x` stops only that service, and Enter opens its `describe` fields. A command that fails opens the error along the bottom; esc closes it. `requires` start first and are not published. `cat9s` does not write VIP Services, Serve, or the ACL, and it needs a terminal.
 
 `up`, `stop`, and `health` read optional `launch` and `check` on each catalog row.
 `launch.start` is argv (not a shell).

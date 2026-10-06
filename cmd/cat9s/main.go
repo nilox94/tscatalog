@@ -1,0 +1,69 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"charm.land/fang/v2"
+	"github.com/charmbracelet/x/term"
+	"github.com/spf13/cobra"
+
+	"tscatalog/internal/catalog"
+	"tscatalog/internal/tsapi"
+	"tscatalog/internal/tui"
+)
+
+const longHelp = `Browse the catalog and restart local processes.
+
+Published services that are down or unhealthy are listed first.
+r restarts the selected service. R restarts every visible service
+whose process needs it. / filters by name.
+
+Restart starts a dead process. If the port is open, it stops and
+starts the process only when this catalog launched it. requires
+start first and are not published. A command that fails opens the
+error along the bottom; esc closes it. cat9s does not write VIP
+Services, Serve, or the ACL.
+
+Catalog file (when -f is omitted): TSCATALOG_CATALOG, then
+$XDG_CONFIG_HOME/tscatalog/catalog.yaml, then ./catalog.yaml.`
+
+func main() {
+	if err := fang.Execute(context.Background(), newCmd()); err != nil {
+		os.Exit(1)
+	}
+}
+
+func newCmd() *cobra.Command {
+	var file string
+	var cat *catalog.File
+	cmd := &cobra.Command{
+		Use:           "cat9s",
+		Short:         "Browse and restart catalog services",
+		Long:          longHelp,
+		Args:          cobra.NoArgs,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		PersistentPreRunE: func(*cobra.Command, []string) error {
+			catPath, err := catalog.ResolvePath(file)
+			if err != nil {
+				return err
+			}
+			if err := tsapi.LoadDotEnv(filepath.Join(filepath.Dir(catPath), ".env")); err != nil {
+				return err
+			}
+			cat, err = catalog.Load(catPath)
+			return err
+		},
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !term.IsTerminal(os.Stdout.Fd()) {
+				return fmt.Errorf("cat9s needs a terminal")
+			}
+			return tui.Run(cmd.Context(), cat)
+		},
+	}
+	cmd.Flags().StringVarP(&file, "file", "f", "", "catalog file (default: auto-discover)")
+	return cmd
+}

@@ -1,6 +1,6 @@
 # CLI refactor plan
 
-Catalog services stay the noun. `plan` / `apply` stay the tailnet reconciler. Local processes are a phase of `up`, not their own command. A TUI is out of scope until this surface is stable.
+Catalog services stay the noun. `plan` / `apply` stay the tailnet reconciler. Local processes are a phase of `up`, not their own command. The interactive browser is the separate `cat9s` binary.
 
 Defaults below are what implementation should follow unless you override the open decisions at the end.
 
@@ -31,7 +31,7 @@ Keep two layers. Do not invent a third verb (`sync`, `publish`, `ensure`).
 
 `health --repair` goes away. Repairing a dead process is `up`. A second mutator on a read command recreates `start`.
 
-Bubble Tea (`watch`) waits. This refactor only has to leave a stable noun (`describe` / `health` / `up` / `stop`) for that screen to call.
+`cat9s` is the browser over those nouns. `r` / `R` restart a local process; they do not call `apply`.
 
 ## What is wrong today
 
@@ -133,7 +133,7 @@ In `cmd/tscatalog/main.go` and `README.md`.
 
 ### 4. Later (not this refactor)
 
-- `watch` — Bubble Tea over `list` + `health`, actions call `up` / `stop`.
+- `cat9s` — shipped. Bubble Tea browser: failures first, `/` filter, `r` / `R` restart. Still no `apply` key.
 - `logs` — tail XDG state files for detached launches.
 - Advertise as a real plan row, once it is observable.
 - Pid-aware restart when the listener is up but the catalog process is dead.

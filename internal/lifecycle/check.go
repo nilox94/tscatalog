@@ -137,6 +137,39 @@ func getStatus(ctx context.Context, raw string, timeout time.Duration) (int, err
 	return res.StatusCode, nil
 }
 
+// ValueOK reports whether a probe cell is success.
+// "tcp" is success. With an empty expect list, HTTP 2xx and 3xx are success.
+func ValueOK(value string, expect []int) bool {
+	switch value {
+	case "down", "error", "timeout", "refused":
+		return false
+	case "tcp", "skip":
+		return true
+	}
+	code, err := strconv.Atoi(value)
+	if err != nil {
+		return false
+	}
+	if len(expect) == 0 {
+		return code >= 200 && code < 400
+	}
+	return matchHTTP(code, nil, expect)
+}
+
+// LocalHealthy reports whether the process is accepting the catalog's local check.
+// Public HTTPS and host approval are ignored.
+func LocalHealthy(s catalog.Service, rep Report) bool {
+	switch rep.Bind {
+	case "", "down", "error":
+		return false
+	}
+	expect := s.Check.LocalExpect()
+	if len(expect) == 0 {
+		return rep.Local == "tcp"
+	}
+	return ValueOK(rep.Local, expect)
+}
+
 func matchHTTP(code int, err error, expect []int) bool {
 	if err != nil || code == 0 {
 		return false
