@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"tscatalog/internal/catalog"
+	"tscatalog/internal/composeclient"
 	"tscatalog/internal/host"
 	"tscatalog/internal/lifecycle"
 	"tscatalog/internal/tsapi"
@@ -19,29 +21,51 @@ type live struct {
 	cat *catalog.File
 }
 
-func (l live) Load(ctx context.Context) ([]Row, error) {
-	suffix := ""
-	if md, err := (host.CLI{}).MagicDNS(ctx); err == nil {
-		suffix = strings.TrimSuffix(md.Suffix, ".")
-	}
-	serve, err := (host.CLI{}).GetConfig(ctx)
-	if err != nil {
-		serve = nil
-	}
-	rows := make([]Row, len(l.cat.Services))
-	var wg sync.WaitGroup
-	for i, s := range l.cat.Services {
-		wg.Add(1)
-		go func(i int, s catalog.Service) {
-			defer wg.Done()
-			rows[i] = probeRow(ctx, l.cat, s, serve, suffix)
-		}(i, s)
-	}
-	wg.Wait()
-	return rows, nil
+// probePrep is the shared tailnet and Docker state for one probe pass.
+// Each service is probed on its own after this returns.
+type probePrep struct {
+	suffix  string
+	serve   *catalog.ServeFile
+	comp    *composeclient.Client
+	dialErr error
 }
 
-func probeRow(ctx context.Context, cat *catalog.File, s catalog.Service, serve *catalog.ServeFile, suffix string) Row {
+// Prepare loads MagicDNS, Serve, and the Compose client. Each call is capped
+// so one hung command does not hold the other rows.
+func (l live) Prepare(ctx context.Context) (probePrep, error) {
+	prepCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var prep probePrep
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		if md, err := (host.CLI{}).MagicDNS(prepCtx); err == nil {
+			prep.suffix = strings.TrimSuffix(md.Suffix, ".")
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		serve, err := (host.CLI{}).GetConfig(prepCtx)
+		if err != nil {
+			serve = nil
+		}
+		prep.serve = serve
+	}()
+	go func() {
+		defer wg.Done()
+		prep.comp, prep.dialErr = lifecycle.DialCompose(prepCtx, l.cat.Services)
+	}()
+	wg.Wait()
+	return prep, nil
+}
+
+// Probe checks one service. The caller paints the row when this returns.
+func (l live) Probe(ctx context.Context, prep probePrep, s catalog.Service) Row {
+	return probeRow(ctx, l.cat, s, prep.serve, prep.suffix, prep.comp, prep.dialErr)
+}
+
+func probeRow(ctx context.Context, cat *catalog.File, s catalog.Service, serve *catalog.ServeFile, suffix string, comp *composeclient.Client, dialErr error) Row {
 	hostSum := "local"
 	if s.Published() {
 		hostSum = "(approval unavailable)"
@@ -53,14 +77,31 @@ func probeRow(ctx context.Context, cat *catalog.File, s catalog.Service, serve *
 	if s.Published() && suffix != "" {
 		pub = "https://" + s.TailscaleLabel() + "." + suffix
 	}
-	return Row{
-		Service: s,
-		Report:  lifecycle.Probe(ctx, s, pub, hostSum),
-		Serve:   serveText(cat, s, serve),
-		URL:     urlText(s, suffix),
-		Owned:   lifecycle.CatalogOwns(s),
-		Fresh:   true,
+	lctx := ctx
+	if composeLaunch(s) {
+		var cancel context.CancelFunc
+		lctx, cancel = context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
 	}
+	return Row{
+		Service:  s,
+		Report:   lifecycle.Probe(ctx, s, pub, hostSum),
+		Serve:    serveText(cat, s, serve),
+		URL:      urlText(s, suffix),
+		Owned:    lifecycle.CatalogOwns(s),
+		Fresh:    true,
+		Launches: lifecycle.LaunchStatuses(lctx, s, comp, dialErr),
+	}
+}
+
+func composeLaunch(s catalog.Service) bool {
+	for _, spec := range s.Launch {
+		kind, err := spec.ResolveKind()
+		if err == nil && kind == catalog.KindCompose {
+			return true
+		}
+	}
+	return false
 }
 
 func serveText(cat *catalog.File, s catalog.Service, serve *catalog.ServeFile) string {

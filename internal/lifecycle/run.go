@@ -65,28 +65,44 @@ func Start(ctx context.Context, s catalog.Service, w io.Writer) error {
 		return nil
 	}
 	for i, spec := range s.Launch {
-		if spec.Detach {
+		for _, warning := range spec.Warnings() {
+			fmt.Fprintf(w, "%s: %s\n", s.Name, warning)
+		}
+		kind, err := spec.ResolveKind()
+		if err != nil {
+			return fmt.Errorf("%s launch[%d]: %w", s.Name, i, err)
+		}
+		switch kind {
+		case catalog.KindProcess:
 			if err := startDetached(s.Name, i, spec); err != nil {
 				return fmt.Errorf("%s launch[%d]: %w", s.Name, i, err)
 			}
 			fmt.Fprintf(w, "%s launch[%d] started (detached) %s\n", s.Name, i, strings.Join(spec.Start, " "))
-			continue
+		case catalog.KindExternal:
+			cmd := command(spec)
+			out, err := cmd.CombinedOutput()
+			if len(out) > 0 {
+				fmt.Fprint(w, string(out))
+			}
+			if err != nil {
+				return fmt.Errorf("%s launch[%d]: %w", s.Name, i, err)
+			}
+			fmt.Fprintf(w, "%s launch[%d] %s\n", s.Name, i, strings.Join(spec.Start, " "))
+		case catalog.KindCompose:
+			if err := startCompose(ctx, spec); err != nil {
+				return fmt.Errorf("%s launch[%d]: %w", s.Name, i, err)
+			}
+			fmt.Fprintf(w, "%s launch[%d] started (compose)\n", s.Name, i)
 		}
-		cmd := command(spec)
-		out, err := cmd.CombinedOutput()
-		if len(out) > 0 {
-			fmt.Fprint(w, string(out))
-		}
-		if err != nil {
-			return fmt.Errorf("%s launch[%d]: %w", s.Name, i, err)
-		}
-		fmt.Fprintf(w, "%s launch[%d] %s\n", s.Name, i, strings.Join(spec.Start, " "))
 	}
 	deadline := time.Now().Add(defaultWait)
 	for {
 		if LocalReady(ctx, s) {
 			fmt.Fprintf(w, "%s %s %s\n", s.Name, style.Good("ready on"), s.Local)
 			return nil
+		}
+		if reason := exitedLaunch(s); reason != "" {
+			return fmt.Errorf("%s: %s", s.Name, reason)
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("%s: still not listening on %s after %s", s.Name, s.Local, defaultWait)
@@ -107,29 +123,54 @@ func Stop(ctx context.Context, s catalog.Service, w io.Writer) error {
 	}
 	var first error
 	for i, spec := range s.Launch {
-		if len(spec.Stop) > 0 {
-			cmd := commandStop(spec)
-			out, err := cmd.CombinedOutput()
-			if len(out) > 0 {
-				fmt.Fprint(w, string(out))
+		kind, err := spec.ResolveKind()
+		if err != nil {
+			if first == nil {
+				first = fmt.Errorf("%s launch[%d]: %w", s.Name, i, err)
 			}
-			if err != nil && first == nil {
+			continue
+		}
+		switch kind {
+		case catalog.KindProcess:
+			if len(spec.Stop) > 0 {
+				if err := runStopArgv(spec, w); err != nil && first == nil {
+					first = fmt.Errorf("%s stop[%d]: %w", s.Name, i, err)
+				}
+				fmt.Fprintf(w, "%s stop[%d] %s\n", s.Name, i, strings.Join(spec.Stop, " "))
+				continue
+			}
+			if err := stopPID(s.Name, i, spec.ID(i)); err != nil && first == nil {
+				first = err
+			} else if err == nil {
+				fmt.Fprintf(w, "%s stop[%d] killed detached pid\n", s.Name, i)
+			}
+		case catalog.KindExternal:
+			if len(spec.Stop) == 0 {
+				if first == nil {
+					first = fmt.Errorf("%s launch[%d]: no stop argv (and not detached)", s.Name, i)
+				}
+				continue
+			}
+			if err := runStopArgv(spec, w); err != nil && first == nil {
 				first = fmt.Errorf("%s stop[%d]: %w", s.Name, i, err)
 			}
 			fmt.Fprintf(w, "%s stop[%d] %s\n", s.Name, i, strings.Join(spec.Stop, " "))
-			continue
-		}
-		if !spec.Detach {
-			if first == nil {
-				first = fmt.Errorf("%s launch[%d]: no stop argv (and not detached)", s.Name, i)
+		case catalog.KindCompose:
+			if err := stopCompose(ctx, spec); err != nil && first == nil {
+				first = fmt.Errorf("%s stop[%d]: %w", s.Name, i, err)
+			} else if err == nil {
+				fmt.Fprintf(w, "%s stop[%d] compose down\n", s.Name, i)
 			}
-			continue
-		}
-		if err := stopPID(s.Name, i); err != nil && first == nil {
-			first = err
-		} else if err == nil {
-			fmt.Fprintf(w, "%s stop[%d] killed detached pid\n", s.Name, i)
 		}
 	}
 	return first
+}
+
+func runStopArgv(spec catalog.LaunchSpec, w io.Writer) error {
+	cmd := commandStop(spec)
+	out, err := cmd.CombinedOutput()
+	if len(out) > 0 {
+		fmt.Fprint(w, string(out))
+	}
+	return err
 }

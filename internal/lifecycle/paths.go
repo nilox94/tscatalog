@@ -77,10 +77,26 @@ func pidfilePaths(name string, index int) ([]string, error) {
 	return []string{cur, leg}, nil
 }
 
-func logPath(name string) (string, error) {
+func logPath(name, id string) (string, error) {
 	dir, err := logDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, name+".log"), nil
+	return filepath.Join(dir, fmt.Sprintf("%s.%s.log", name, id)), nil
+}
+
+func exitPath(name, id string) (string, error) {
+	dir, err := runDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, fmt.Sprintf("%s.%s.exit", name, id)), nil
+}
+
+func stopIntentPath(name, id string) (string, error) {
+	dir, err := runDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, fmt.Sprintf("%s.%s.stop", name, id)), nil
 }

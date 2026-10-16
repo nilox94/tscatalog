@@ -9,12 +9,31 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"tscatalog/internal/catalog"
 )
+
+func TestStartReportsExitReason(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	s := catalog.Service{
+		Name:   "fastfail",
+		Local:  "http://127.0.0.1:9",
+		Launch: catalog.Launch{{Start: []string{"sh", "-c", "echo error: broker missing >&2; exit 1"}, Detach: true}},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	err := Start(ctx, s, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "broker missing") {
+		t.Fatalf("err %v", err)
+	}
+	if ctx.Err() != nil {
+		t.Fatal("start waited out the deadline instead of the exit")
+	}
+}
 
 func TestStartDetachedAndStop(t *testing.T) {
 	dir := t.TempDir()
@@ -68,7 +87,7 @@ func TestStopPIDLegacyPath(t *testing.T) {
 	if err := os.WriteFile(legPath, []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := stopPID("legacy", 0); err != nil {
+	if err := stopPID("legacy", 0, "0"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(legPath); !os.IsNotExist(err) {

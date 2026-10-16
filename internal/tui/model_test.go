@@ -162,6 +162,17 @@ type errString string
 
 func (e errString) Error() string { return string(e) }
 
+func TestFilterLogLines(t *testing.T) {
+	lines := []string{"app | error", "app | ok"}
+	got := filterLogLines(lines, "ERROR")
+	if len(got) != 1 || got[0] != "app | error" {
+		t.Fatalf("filtered %v", got)
+	}
+	if same := filterLogLines(lines, ""); len(same) != 2 || same[0] != lines[0] {
+		t.Fatalf("empty filter %v", same)
+	}
+}
+
 func TestDescribeAndQuit(t *testing.T) {
 	m := testModel([]Row{svc("web", true, true)})
 	m.rows[0].URL = "https://web.example.ts.net"
@@ -253,6 +264,51 @@ func cursorLine(body string) string {
 		}
 	}
 	return ""
+}
+
+func TestRowUpdatesBeforeTheRestFinish(t *testing.T) {
+	m := testModel([]Row{svc("web", true, true), svc("api", true, true)})
+	m.loading = true
+	m.placed = false
+	m.pending = 2
+	m.probeGen = 1
+	m.rows[0].Report.Bind = "…"
+	m.rows[1].Report.Bind = "…"
+
+	done := svc("web", true, false)
+	updated, _ := m.Update(probedMsg{gen: 1, row: done})
+	got := updated.(model)
+	if !got.loading {
+		t.Fatal("load should stay open until the other row finishes")
+	}
+	body := got.View().Content
+	if !strings.Contains(body, "down") || !strings.Contains(body, "…") {
+		t.Fatalf("partial table:\n%s", body)
+	}
+	if got.selected != "web" {
+		t.Fatalf("cursor moved before the pass finished: %s", got.selected)
+	}
+
+	stale := svc("api", true, false)
+	updated, _ = got.Update(probedMsg{gen: 0, row: stale})
+	got = updated.(model)
+	if got.pending != 1 || got.rows[1].Report.Bind != "…" {
+		t.Fatalf("stale probe applied: pending=%d bind=%s", got.pending, got.rows[1].Report.Bind)
+	}
+
+	other := svc("api", true, true)
+	other.Report.Bind = ":9"
+	updated, _ = got.Update(probedMsg{gen: 1, row: other})
+	got = updated.(model)
+	if got.loading || got.pending != 0 {
+		t.Fatalf("loading=%v pending=%d", got.loading, got.pending)
+	}
+	if got.selected != "web" {
+		t.Fatalf("selected %s", got.selected)
+	}
+	if !strings.Contains(got.View().Content, ":9") {
+		t.Fatalf("second row:\n%s", got.View().Content)
+	}
 }
 
 func TestFirstProbeLandsOnFailure(t *testing.T) {

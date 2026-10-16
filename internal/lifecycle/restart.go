@@ -27,19 +27,29 @@ type Decision struct {
 	Note string
 }
 
-// CatalogOwns reports whether this catalog can stop the process.
-// A stop argv is the catalog's own stop path. A detached launch counts
-// only while its pidfile is still alive. Anything else listening on the
-// port is not ours.
+// CatalogOwns reports whether this catalog can stop the service.
+// A process counts while its pidfile is still the process we started.
+// An external helper counts when it has a stop argv.
+// A compose project always counts. Anything else listening on the port is not ours.
 func CatalogOwns(s catalog.Service) bool {
 	if !s.Launch.Defined() {
 		return false
 	}
 	for i, spec := range s.Launch {
-		if len(spec.Stop) > 0 {
-			return true
+		kind, err := spec.ResolveKind()
+		if err != nil {
+			continue
 		}
-		if spec.Detach && detachedAlive(s.Name, i) {
+		switch kind {
+		case catalog.KindProcess:
+			if detachedAlive(s.Name, i) {
+				return true
+			}
+		case catalog.KindExternal:
+			if len(spec.Stop) > 0 {
+				return true
+			}
+		case catalog.KindCompose:
 			return true
 		}
 	}
@@ -97,6 +107,11 @@ func Restart(ctx context.Context, cat *catalog.File, name string, w io.Writer) e
 		if !CatalogOwns(s) {
 			return fmt.Errorf("%s: something else holds %s", s.Name, s.Local)
 		}
+		comp, err := DialCompose(ctx, []catalog.Service{s})
+		if err != nil {
+			return err
+		}
+		ctx = WithCompose(ctx, comp)
 		if err := Stop(ctx, s, w); err != nil {
 			return err
 		}
@@ -107,6 +122,13 @@ func Restart(ctx context.Context, cat *catalog.File, name string, w io.Writer) e
 	svcs, err := cat.ExpandForRuntime([]string{s.Name})
 	if err != nil {
 		return err
+	}
+	if composeFrom(ctx) == nil {
+		comp, err := DialCompose(ctx, svcs)
+		if err != nil {
+			return err
+		}
+		ctx = WithCompose(ctx, comp)
 	}
 	for _, dep := range svcs {
 		if err := Start(ctx, dep, w); err != nil {

@@ -2,16 +2,10 @@
 
 package lifecycle
 
-import (
-	"errors"
-	"syscall"
-)
-
 func detachedAlive(name string, index int) bool {
-	_, pid, err := readPidfile(name, index)
-	if err != nil || pid <= 0 {
+	rec, err := readPidfile(name, index)
+	if err != nil || rec.PID <= 0 {
 		return false
 	}
-	err = syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
+	return sameProcess(rec.PID, rec.StartID)
 }

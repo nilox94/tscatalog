@@ -23,7 +23,7 @@ func (m model) View() tea.View {
 // cursorY is the screen line of the selected service, under the key bar,
 // summary, status, the blank line, and the column header.
 func (m model) cursorY() (int, bool) {
-	if m.detail || m.filtering {
+	if m.detail || m.filtering || m.logView {
 		return 0, false
 	}
 	rows, cursor := m.viewRows()
@@ -34,6 +34,9 @@ func (m model) cursorY() (int, bool) {
 }
 
 func (m model) render() string {
+	if m.logView {
+		return m.renderLogs()
+	}
 	var b strings.Builder
 	if m.filtering {
 		fmt.Fprintf(&b, "%s %s█\n", style.Bold("/"), m.filter)
@@ -253,7 +256,60 @@ func (m model) renderDetail(row Row) string {
 	writeField(&b, "requires", req)
 	writeField(&b, "bind", row.Report.Bind)
 	writeField(&b, "probe", "local "+row.Report.Local+"  public "+row.Report.Public)
+	for _, st := range row.Launches {
+		key, value := st.Describe()
+		writeField(&b, key, value)
+	}
 	return b.String()
+}
+
+func (m model) renderLogs() string {
+	var b strings.Builder
+	if m.logFiltering {
+		fmt.Fprintf(&b, "%s %s█\n", style.Bold("/"), m.logFilter)
+	} else {
+		fmt.Fprintln(&b, style.Faint(logBar))
+	}
+	fmt.Fprintln(&b, paintStatus(m.status))
+	lines := filterLogLines(m.logLines, m.logFilter)
+	room := m.logBody()
+	start := m.logOffset
+	if start < 0 {
+		start = 0
+	}
+	if start > len(lines) {
+		start = len(lines)
+	}
+	end := start + room
+	if end > len(lines) {
+		end = len(lines)
+	}
+	shown := 0
+	if len(lines) == 0 {
+		fmt.Fprintln(&b, style.Faint("  (no lines)"))
+		shown++
+	}
+	for _, line := range lines[start:end] {
+		fmt.Fprintln(&b, line)
+		shown++
+	}
+	writeBlank(&b, room-shown)
+	return b.String()
+}
+
+func filterLogLines(lines []string, filter string) []string {
+	filter = strings.TrimSpace(filter)
+	if filter == "" {
+		return lines
+	}
+	f := strings.ToLower(filter)
+	var out []string
+	for _, line := range lines {
+		if strings.Contains(strings.ToLower(line), f) {
+			out = append(out, line)
+		}
+	}
+	return out
 }
 
 func writeField(b *strings.Builder, key, value string) {
@@ -309,6 +365,7 @@ func paintStatus(s string) string {
 	}
 	if strings.Contains(s, "holds") ||
 		strings.Contains(s, "no launch") ||
+		strings.Contains(s, "no logs") ||
 		strings.Contains(s, "will not fix") ||
 		strings.Contains(s, "error") ||
 		strings.Contains(s, "still listening") {

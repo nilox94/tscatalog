@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 
@@ -16,6 +17,7 @@ import (
 	"tailscale.com/client/tailscale/v2"
 
 	"tscatalog/internal/catalog"
+	"tscatalog/internal/composeclient"
 	"tscatalog/internal/host"
 	"tscatalog/internal/lifecycle"
 	"tscatalog/internal/policy"
@@ -38,6 +40,13 @@ The tailnet name is not stored in the catalog. Public URLs are
 https://<service>.<tailnet>.ts.net — always port 443.`
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "__reap" {
+		if err := lifecycle.Reap(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := fang.Execute(context.Background(), newRootCmd()); err != nil {
 		os.Exit(1)
 	}
@@ -153,8 +162,8 @@ Arguments may be a catalog name, a vip label, or svc:<label>.`,
 
 	var localOnly bool
 	up := named("up", "Start selected services, reconcile the tailnet, then probe",
-		`Phases, in order: start catalog launch, apply, health.
-Names limit launch, VIP puts, Serve, steady-state advertise, and probes.
+		`Phases, in order: start catalog programs, apply, health.
+Names limit those starts, VIP puts, Serve, steady-state advertise, and probes.
 The ACL merge is always the whole catalog. After an ACL write, every
 service is drained, re-served, and advertised.
 
@@ -172,6 +181,35 @@ a process that still holds that port.`,
 		named("describe", "Print catalog services with VIP, Serve, approval, and public URL",
 			"Arguments may be a catalog name, a vip label, or svc:<label>.", runDescribe),
 	)
+
+	ps := &cobra.Command{
+		Use:   "ps [name ...]",
+		Short: "Show processes and containers",
+		Long: `A process row is a child this program detached (pid and exit from the reaper).
+A container row is one Compose service.
+A row with shape - is a start/stop helper, not a process or a container.`,
+		ValidArgsFunction: completeNames,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runPS(cmd.Context(), cat, args)
+		},
+	}
+	var follow bool
+	var tail int
+	logsCmd := &cobra.Command{
+		Use:   "logs [service] [name]",
+		Short: "Show output for a service",
+		Long: `logs <service> follows every row of that service.
+logs <service> <name> uses the NAME column from ps.
+--tail -1 shows every line. A row with shape - runs its logs argv unchanged.`,
+		ValidArgsFunction: completeNames,
+		Args:              cobra.MaximumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runLogs(cmd, cat, args, tail, follow)
+		},
+	}
+	logsCmd.Flags().BoolVarP(&follow, "follow", "f", false, "keep reading until interrupted")
+	logsCmd.Flags().IntVar(&tail, "tail", 100, "lines to show (-1 is all)")
+	root.AddCommand(ps, logsCmd)
 	return root
 }
 
@@ -294,6 +332,7 @@ func runDescribe(ctx context.Context, cat *catalog.File, names []string) error {
 		byName[s.Name] = s
 	}
 	suffix := magicSuffix(ctx)
+	comp, dialErr := lifecycle.DialCompose(ctx, svcs)
 
 	for i, s := range svcs {
 		if i > 0 {
@@ -305,7 +344,7 @@ func runDescribe(ctx context.Context, cat *catalog.File, names []string) error {
 		} else {
 			approval = tsapi.ApprovalSummary(hosts)
 		}
-		printShow(style.Writer(os.Stdout), s, cat.Endpoint, byName[s.SVCName()], serve, suffix, approval)
+		printShow(ctx, style.Writer(os.Stdout), s, cat.Endpoint, byName[s.SVCName()], serve, suffix, approval, comp, dialErr)
 	}
 	return nil
 }
@@ -318,7 +357,7 @@ func shortNames(cat *catalog.File) []string {
 	return out
 }
 
-func printShow(w io.Writer, s catalog.Service, endpoint string, api tailscale.Service, serve *catalog.ServeFile, suffix, approval string) {
+func printShow(ctx context.Context, w io.Writer, s catalog.Service, endpoint string, api tailscale.Service, serve *catalog.ServeFile, suffix, approval string, comp *composeclient.Client, dialErr error) {
 	fmt.Fprintln(w, style.Bold(s.Name))
 	field(w, "svc", s.SVCName())
 	if s.TailscaleLabel() != s.Name {
@@ -378,6 +417,10 @@ func printShow(w io.Writer, s catalog.Service, endpoint string, api tailscale.Se
 	field(w, "serve", serveT)
 	if approval != "" {
 		field(w, "host", style.Host(approval))
+	}
+	for _, st := range lifecycle.LaunchStatuses(ctx, s, comp, dialErr) {
+		key, value := st.Describe()
+		field(w, key, value)
 	}
 }
 
@@ -481,6 +524,11 @@ func runRuntime(ctx context.Context, cat *catalog.File, names []string) error {
 	if err != nil {
 		return err
 	}
+	comp, err := lifecycle.DialCompose(ctx, svcs)
+	if err != nil {
+		return err
+	}
+	ctx = lifecycle.WithCompose(ctx, comp)
 	var first error
 	for _, s := range svcs {
 		if err := lifecycle.Start(ctx, s, style.Writer(os.Stdout)); err != nil {
@@ -498,6 +546,11 @@ func runStop(ctx context.Context, cat *catalog.File, names []string) error {
 	if err != nil {
 		return err
 	}
+	comp, err := lifecycle.DialCompose(ctx, svcs)
+	if err != nil {
+		return err
+	}
+	ctx = lifecycle.WithCompose(ctx, comp)
 	var first error
 	for _, s := range svcs {
 		if err := lifecycle.Stop(ctx, s, style.Writer(os.Stdout)); err != nil {
@@ -552,6 +605,51 @@ func runHealth(ctx context.Context, cat *catalog.File, names []string) error {
 
 func bindOK(value string) bool {
 	return value != "" && value != "down" && value != "error"
+}
+
+func runPS(ctx context.Context, cat *catalog.File, names []string) error {
+	svcs, err := selectServices(cat, names)
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
+	defer stop()
+	comp, dialErr := lifecycle.DialCompose(ctx, svcs)
+	w := style.Writer(os.Stdout)
+	for _, s := range svcs {
+		for _, spec := range s.Launch {
+			for _, warning := range spec.Warnings() {
+				fmt.Fprintf(w, "%s: %s\n", s.Name, warning)
+			}
+		}
+	}
+	var rows []lifecycle.LaunchStatus
+	for _, s := range svcs {
+		rows = append(rows, lifecycle.LaunchStatuses(ctx, s, comp, dialErr)...)
+	}
+	fmt.Fprint(w, lifecycle.FormatPS(rows))
+	return nil
+}
+
+func runLogs(cmd *cobra.Command, cat *catalog.File, args []string, tail int, follow bool) error {
+	if len(args) == 0 {
+		return fmt.Errorf("logs needs a catalog service")
+	}
+	s, ok := cat.Lookup(args[0])
+	if !ok {
+		return fmt.Errorf("unknown service %q (catalog: %s)", args[0], strings.Join(shortNames(cat), ", "))
+	}
+	which := ""
+	if len(args) > 1 {
+		which = args[1]
+	}
+	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
+	defer stop()
+	comp, err := lifecycle.DialCompose(ctx, []catalog.Service{s})
+	if err != nil {
+		return err
+	}
+	return lifecycle.Logs(ctx, s, which, tail, follow, cmd.Flags().Changed("tail"), os.Stdout, comp)
 }
 
 func runUp(ctx context.Context, cat *catalog.File, names []string, publish bool) error {

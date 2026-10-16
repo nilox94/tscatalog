@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // ServiceHost is one advertised host for a VIP Service.
@@ -40,7 +42,11 @@ func ListHosts(ctx context.Context, name string) ([]ServiceHost, error) {
 	}
 	req.Header.Set("Authorization", "Bearer "+c.APIKey)
 	req.Header.Set("User-Agent", "tscatalog")
-	res, err := http.DefaultClient.Do(req)
+	// DefaultClient's dial timeout is 30s, and this lookup is on the probe path.
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req = req.WithContext(ctx)
+	res, err := hostClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -77,4 +83,17 @@ func ApprovalSummary(hosts []ServiceHost) string {
 		parts = append(parts, level+" / "+cfg)
 	}
 	return strings.Join(parts, "; ")
+}
+
+// hostClient bounds the approval lookup. http.DefaultClient would dial for 30s.
+var hostClient = &http.Client{
+	Timeout: 5 * time.Second,
+	Transport: &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout: 5 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ResponseHeaderTimeout: 5 * time.Second,
+	},
 }

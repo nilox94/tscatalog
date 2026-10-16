@@ -124,9 +124,13 @@ func getStatus(ctx context.Context, raw string, timeout time.Duration) (int, err
 			return http.ErrUseLastResponse
 		},
 		Transport: &http.Transport{
-			Proxy:               http.ProxyFromEnvironment,
-			TLSHandshakeTimeout: timeout,
-			TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout: timeout,
+			}).DialContext,
+			TLSHandshakeTimeout:   timeout,
+			ResponseHeaderTimeout: timeout,
+			TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
 		},
 	}
 	res, err := client.Do(req)

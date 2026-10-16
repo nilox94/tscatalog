@@ -9,12 +9,13 @@ import (
 
 // Row is one catalog service plus the latest probe.
 type Row struct {
-	Service catalog.Service
-	Report  lifecycle.Report
-	Serve   string
-	URL     string
-	Owned   bool
-	Fresh   bool
+	Service  catalog.Service
+	Report   lifecycle.Report
+	Serve    string
+	URL      string
+	Owned    bool
+	Fresh    bool
+	Launches []lifecycle.LaunchStatus
 }
 
 func order(rows []Row, filter string) []Row {

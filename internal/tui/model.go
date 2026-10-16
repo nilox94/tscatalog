@@ -15,13 +15,16 @@ import (
 )
 
 const (
-	keyBar    = "r restart  R restart all  x stop  / filter  enter describe  q quit"
+	keyBar    = "r restart  R restart all  x stop  l logs  / filter  enter describe  q quit"
 	detailBar = "esc back  q quit"
+	logBar    = "f follow  / search  tab name  esc back"
 )
 
-// Loader fetches probes. The TUI calls it on a timer.
+// Loader fetches probes. Prepare runs once per pass; Probe runs per service
+// so the table can paint each row as it finishes.
 type Loader interface {
-	Load(ctx context.Context) ([]Row, error)
+	Prepare(ctx context.Context) (probePrep, error)
+	Probe(ctx context.Context, prep probePrep, s catalog.Service) Row
 }
 
 // Runner stops and restarts local processes. It does not publish.
@@ -45,6 +48,8 @@ type model struct {
 	placed    bool
 	busy      bool
 	loading   bool
+	probeGen  int
+	pending   int
 	status    string
 	// errText is the open bottom panel. Empty means the panel is closed.
 	errText string
@@ -54,11 +59,41 @@ type model struct {
 	// anchor is the selected service's row inside the visible body.
 	// Reloads keep that screen line when the service's list index changes.
 	anchor int
+
+	logView      bool
+	logLines     []string
+	logFilter    string
+	logFiltering bool
+	logFollow    bool
+	logWhich     string
+	logOffset    int
+	logStick     bool
+	logCancel    context.CancelFunc
+	logFiles     []trackedLog
+	logStream    bool
+}
+
+type trackedLog struct {
+	path    string
+	offset  int64
+	prefix  string
+	partial string
 }
 
 type loadedMsg struct {
 	rows []Row
 	err  error
+}
+
+type preparedMsg struct {
+	gen  int
+	prep probePrep
+	err  error
+}
+
+type probedMsg struct {
+	gen int
+	row Row
 }
 
 type actionDone struct {
@@ -67,6 +102,26 @@ type actionDone struct {
 }
 
 type tickMsg struct{}
+
+type logLoadedMsg struct {
+	which  string
+	lines  []string
+	files  []lifecycle.LogFile
+	stream bool
+	err    error
+}
+
+type logTickMsg struct {
+	which string
+}
+
+type logStreamMsg struct {
+	which string
+	line  string
+	err   error
+	ch    <-chan string
+	done  bool
+}
 
 func newModel(ctx context.Context, cat *catalog.File, loader Loader, runner Runner) model {
 	if ctx == nil {
@@ -141,26 +196,117 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.tickCmd()
 		}
 		m.loading = true
+		m.probeGen++
 		return m, tea.Batch(m.loadCmd(), m.tickCmd())
 	case loadedMsg:
 		m.loading = false
+		m.pending = 0
 		if msg.err != nil {
 			m.status = msg.err.Error()
 		}
 		if len(msg.rows) > 0 {
 			m.rows = msg.rows
 		}
-		if !m.placed {
-			for _, row := range order(m.rows, m.filter) {
-				if attention(row) {
-					m.selected = row.Service.Name
-					break
-				}
-			}
-			m.placed = true
-		}
+		m.placeInitial()
 		m.follow()
 		return m, nil
+	case preparedMsg:
+		if msg.gen != m.probeGen {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.status = msg.err.Error()
+		}
+		if m.cat == nil || len(m.cat.Services) == 0 {
+			m.pending = 0
+			m.loading = false
+			m.placeInitial()
+			m.follow()
+			return m, nil
+		}
+		m.pending = len(m.cat.Services)
+		cmds := make([]tea.Cmd, 0, len(m.cat.Services))
+		for _, s := range m.cat.Services {
+			cmds = append(cmds, m.probeCmd(msg.gen, msg.prep, s))
+		}
+		return m, tea.Batch(cmds...)
+	case probedMsg:
+		if msg.gen != m.probeGen {
+			return m, nil
+		}
+		m.applyProbe(msg.row)
+		if m.pending > 0 {
+			m.pending--
+		}
+		if m.loading && m.pending == 0 {
+			m.loading = false
+			m.placeInitial()
+			m.follow()
+			return m, nil
+		}
+		if m.placed {
+			m.follow()
+		}
+		return m, nil
+	case logLoadedMsg:
+		if !m.logView || msg.which != m.logWhich {
+			return m, nil
+		}
+		m.logFiles = nil
+		for _, f := range msg.files {
+			m.logFiles = append(m.logFiles, trackedLog{path: f.Path, offset: f.Offset, prefix: f.Prefix})
+		}
+		m.logStream = msg.stream
+		m.logLines = nil
+		m.logOffset = 0
+		m.logStick = true
+		if msg.err != nil {
+			m.status = msg.err.Error()
+		} else if m.status != "" && !m.logFollow {
+			m.status = ""
+		}
+		m.appendLogs(msg.lines)
+		if !m.logFollow {
+			return m, nil
+		}
+		m.stopFollow()
+		ctx, cancel := context.WithCancel(m.ctx)
+		m.logCancel = cancel
+		return m, m.followCmd(ctx)
+	case logTickMsg:
+		if !m.logView || !m.logFollow || msg.which != m.logWhich {
+			return m, nil
+		}
+		var added []string
+		for i := range m.logFiles {
+			chunk, next, err := lifecycle.ReadSince(m.logFiles[i].path, m.logFiles[i].offset)
+			if err != nil {
+				continue
+			}
+			m.logFiles[i].offset = next
+			text := m.logFiles[i].partial + string(chunk)
+			parts := strings.Split(text, "\n")
+			m.logFiles[i].partial = parts[len(parts)-1]
+			for _, line := range parts[:len(parts)-1] {
+				added = append(added, m.logFiles[i].prefix+line)
+			}
+		}
+		m.appendLogs(added)
+		return m, m.logTickCmd()
+	case logStreamMsg:
+		if !m.logView || !m.logFollow || msg.which != m.logWhich {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.status = msg.err.Error()
+		}
+		if msg.line != "" {
+			m.appendLogs([]string{msg.line})
+		}
+		if msg.done || msg.ch == nil {
+			return m, nil
+		}
+		return m, readLogStream(m.logWhich, msg.ch)
 	case actionDone:
 		m.busy = false
 		if msg.err != nil {
@@ -176,12 +322,39 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.loading = true
+		m.probeGen++
 		return m, m.loadCmd()
 	}
 	return m, nil
 }
 
+func (m *model) placeInitial() {
+	if m.placed {
+		return
+	}
+	for _, row := range order(m.rows, m.filter) {
+		if attention(row) {
+			m.selected = row.Service.Name
+			break
+		}
+	}
+	m.placed = true
+}
+
+func (m *model) applyProbe(row Row) {
+	for i := range m.rows {
+		if m.rows[i].Service.Name == row.Service.Name {
+			m.rows[i] = row
+			return
+		}
+	}
+	m.rows = append(m.rows, row)
+}
+
 func (m model) onKey(s string) (model, tea.Cmd) {
+	if m.logView {
+		return m.onLogKey(s)
+	}
 	if m.filtering {
 		switch s {
 		case "esc":
@@ -252,8 +425,296 @@ func (m model) onKey(s string) (model, tea.Cmd) {
 		return m.restartAll()
 	case "x":
 		return m.stopOne()
+	case "l":
+		return m.openLogs()
 	}
 	return m, nil
+}
+
+func (m model) onLogKey(s string) (model, tea.Cmd) {
+	if m.logFiltering {
+		switch s {
+		case "esc":
+			m.logFiltering = false
+		case "enter":
+			m.logFiltering = false
+			m.pinLogs()
+		case "backspace":
+			m.logFilter = dropLast(m.logFilter)
+			m.pinLogs()
+		case "ctrl+c":
+			return m, tea.Quit
+		default:
+			if isPrintable(s) {
+				m.logFilter += s
+				m.pinLogs()
+			}
+		}
+		return m, nil
+	}
+	switch s {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "/":
+		m.logFiltering = true
+		m.logFilter = ""
+		m.pinLogs()
+		return m, nil
+	case "esc":
+		if m.logFilter != "" {
+			m.logFilter = ""
+			m.pinLogs()
+			return m, nil
+		}
+		m.closeLogs()
+		return m, nil
+	case "f":
+		if m.logFollow {
+			m.logFollow = false
+			m.stopFollow()
+			return m, nil
+		}
+		m.logFollow = true
+		m.logStick = true
+		m.pinLogs()
+		m.stopFollow()
+		ctx, cancel := context.WithCancel(m.ctx)
+		m.logCancel = cancel
+		return m, m.followCmd(ctx)
+	case "tab":
+		return m.cycleLog()
+	case "j", "down":
+		m.scrollLog(1)
+		return m, nil
+	case "k", "up":
+		m.scrollLog(-1)
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m model) openLogs() (model, tea.Cmd) {
+	if m.busy {
+		return m, nil
+	}
+	row, ok := m.current()
+	if !ok {
+		return m, nil
+	}
+	if logsBlocked(row.Service) {
+		m.status = row.Service.Name + ": no logs command"
+		return m, nil
+	}
+	m.logView = true
+	m.logWhich = ""
+	m.logFollow = false
+	m.logStick = true
+	m.logLines = nil
+	m.logOffset = 0
+	m.logFilter = ""
+	m.logFiltering = false
+	m.logFiles = nil
+	m.logStream = false
+	m.status = ""
+	return m, m.loadLogs()
+}
+
+func logsBlocked(s catalog.Service) bool {
+	if len(s.Launch) == 0 {
+		return true
+	}
+	for _, spec := range s.Launch {
+		kind, err := spec.ResolveKind()
+		if err != nil {
+			return false
+		}
+		if kind != catalog.KindExternal || len(spec.Logs) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func (m *model) closeLogs() {
+	m.stopFollow()
+	m.logFollow = false
+	m.logView = false
+	m.logLines = nil
+	m.logFiltering = false
+	m.ensureVisible()
+}
+
+func (m *model) stopFollow() {
+	if m.logCancel != nil {
+		m.logCancel()
+		m.logCancel = nil
+	}
+}
+
+func (m model) loadLogs() tea.Cmd {
+	row, ok := m.current()
+	if !ok {
+		return nil
+	}
+	which := m.logWhich
+	svc := row.Service
+	ctx := m.ctx
+	return func() tea.Msg {
+		lines, files, stream, err := lifecycle.CaptureLogs(ctx, svc, which, nil)
+		return logLoadedMsg{which: which, lines: lines, files: files, stream: stream, err: err}
+	}
+}
+
+func (m model) followCmd(ctx context.Context) tea.Cmd {
+	var cmds []tea.Cmd
+	if len(m.logFiles) > 0 {
+		cmds = append(cmds, m.logTickCmd())
+	}
+	if m.logStream {
+		cmds = append(cmds, startLogStream(ctx, m.currentService(), m.logWhich))
+	}
+	return tea.Batch(cmds...)
+}
+
+func (m model) currentService() catalog.Service {
+	row, ok := m.current()
+	if !ok {
+		return catalog.Service{}
+	}
+	return row.Service
+}
+
+func (m model) logTickCmd() tea.Cmd {
+	which := m.logWhich
+	return tea.Tick(200*time.Millisecond, func(time.Time) tea.Msg {
+		return logTickMsg{which: which}
+	})
+}
+
+func startLogStream(ctx context.Context, s catalog.Service, which string) tea.Cmd {
+	ch := make(chan string, 64)
+	go func() {
+		_ = lifecycle.FollowStreams(ctx, s, which, ch)
+		close(ch)
+	}()
+	return readLogStream(which, ch)
+}
+
+func readLogStream(which string, ch <-chan string) tea.Cmd {
+	return func() tea.Msg {
+		line, ok := <-ch
+		if !ok {
+			return logStreamMsg{which: which, done: true}
+		}
+		return logStreamMsg{which: which, line: line, ch: ch}
+	}
+}
+
+func (m model) cycleLog() (model, tea.Cmd) {
+	row, ok := m.current()
+	if !ok {
+		return m, nil
+	}
+	names := logNames(row)
+	if len(names) <= 1 {
+		return m, nil
+	}
+	m.stopFollow()
+	m.logFollow = false
+	m.logWhich = nextLogName(m.logWhich, names)
+	m.logLines = nil
+	m.logOffset = 0
+	m.logStick = true
+	m.logFiles = nil
+	return m, m.loadLogs()
+}
+
+func logNames(row Row) []string {
+	var names []string
+	for _, st := range row.Launches {
+		if st.ID != "" {
+			names = append(names, st.ID)
+		}
+	}
+	return names
+}
+
+func nextLogName(cur string, names []string) string {
+	if cur == "" {
+		return names[0]
+	}
+	for i, name := range names {
+		if name == cur {
+			if i+1 < len(names) {
+				return names[i+1]
+			}
+			return ""
+		}
+	}
+	return names[0]
+}
+
+func (m *model) scrollLog(delta int) {
+	lines := filterLogLines(m.logLines, m.logFilter)
+	maxOff := len(lines) - m.logBody()
+	if maxOff < 0 {
+		maxOff = 0
+	}
+	m.logOffset += delta
+	if m.logOffset < 0 {
+		m.logOffset = 0
+	}
+	if m.logOffset > maxOff {
+		m.logOffset = maxOff
+	}
+	if delta < 0 {
+		m.logStick = false
+	}
+	if m.logOffset >= maxOff {
+		m.logStick = true
+	}
+}
+
+func (m *model) pinLogs() {
+	lines := filterLogLines(m.logLines, m.logFilter)
+	maxOff := len(lines) - m.logBody()
+	if maxOff < 0 {
+		maxOff = 0
+	}
+	if m.logStick {
+		m.logOffset = maxOff
+		return
+	}
+	if m.logOffset > maxOff {
+		m.logOffset = maxOff
+	}
+	if m.logOffset < 0 {
+		m.logOffset = 0
+	}
+}
+
+func (m *model) appendLogs(lines []string) {
+	if len(lines) > 0 {
+		m.logLines = append(m.logLines, lines...)
+		if extra := len(m.logLines) - 2000; extra > 0 {
+			m.logLines = m.logLines[extra:]
+			if !m.logStick {
+				m.logOffset -= extra
+				if m.logOffset < 0 {
+					m.logOffset = 0
+				}
+			}
+		}
+	}
+	m.pinLogs()
+}
+
+func (m model) logBody() int {
+	h := m.height - 2
+	if h < 1 {
+		return 1
+	}
+	return h
 }
 
 func (m model) restartOne() (model, tea.Cmd) {
@@ -338,9 +799,20 @@ func (m model) loadCmd() tea.Cmd {
 	if m.loader == nil {
 		return nil
 	}
+	gen := m.probeGen
+	loader := m.loader
+	ctx := m.ctx
 	return func() tea.Msg {
-		rows, err := m.loader.Load(m.ctx)
-		return loadedMsg{rows: rows, err: err}
+		prep, err := loader.Prepare(ctx)
+		return preparedMsg{gen: gen, prep: prep, err: err}
+	}
+}
+
+func (m model) probeCmd(gen int, prep probePrep, s catalog.Service) tea.Cmd {
+	loader := m.loader
+	ctx := m.ctx
+	return func() tea.Msg {
+		return probedMsg{gen: gen, row: loader.Probe(ctx, prep, s)}
 	}
 }
 
