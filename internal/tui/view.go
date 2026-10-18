@@ -14,23 +14,7 @@ func (m model) View() tea.View {
 	v := tea.NewView(m.render())
 	v.AltScreen = true
 	v.WindowTitle = "cat9s"
-	if y, ok := m.cursorY(); ok {
-		v.Cursor = tea.NewCursor(0, y)
-	}
 	return v
-}
-
-// cursorY is the screen line of the selected service, under the key bar,
-// summary, status, the blank line, and the column header.
-func (m model) cursorY() (int, bool) {
-	if m.detail || m.filtering || m.logView {
-		return 0, false
-	}
-	rows, cursor := m.viewRows()
-	if len(rows) == 0 || cursor < m.offset || cursor >= m.offset+m.bodyHeight() {
-		return 0, false
-	}
-	return 5 + (cursor - m.offset), true
 }
 
 func (m model) render() string {
@@ -80,7 +64,7 @@ func (m model) render() string {
 	}
 	shown := 0
 	for i := start; i < end; i++ {
-		fmt.Fprintln(&b, formatRow(rows[i], i == cursor, nameW, m.width))
+		fmt.Fprintln(&b, formatRow(rows[i], i == cursor, nameW))
 		shown++
 	}
 	writeBlank(&b, room-shown)
@@ -185,17 +169,27 @@ func joinPanel(lines []string) string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
-func formatRow(row Row, selected bool, nameW, width int) string {
+func formatRow(row Row, selected bool, nameW int) string {
 	mark := " "
 	if selected {
-		mark = style.Bold(">")
+		mark = style.SelectMark(">")
 	}
 	name := row.Service.Name
 	if len(name) > nameW {
 		name = name[:nameW]
 	}
 	name = fmt.Sprintf("%-*s", nameW, name)
-	if attention(row) {
+	if selected {
+		if attention(row) {
+			if row.Report.Bind == "down" || row.Report.Bind == "error" {
+				name = style.BoldBad(name)
+			} else {
+				name = style.BoldWarn(name)
+			}
+		} else {
+			name = style.BoldWhite(name)
+		}
+	} else if attention(row) {
 		if row.Report.Bind == "down" || row.Report.Bind == "error" {
 			name = style.Bad(name)
 		} else {
@@ -208,27 +202,49 @@ func formatRow(row Row, selected bool, nameW, width int) string {
 		"%s %s  %s  %s  %s  %s",
 		mark,
 		name,
-		probeCell(8, row.Report.Bind, row.Report.Bind != "" && row.Report.Bind != "down" && row.Report.Bind != "error"),
-		probeCell(10, row.Report.Local, lifecycle.ValueOK(row.Report.Local, row.Service.Check.LocalExpect())),
-		probeCell(10, row.Report.Public, lifecycle.ValueOK(row.Report.Public, row.Service.Check.PublicExpect())),
-		hostCell(row),
+		probeCell(8, row.Report.Bind, row.Report.Bind != "" && row.Report.Bind != "down" && row.Report.Bind != "error", selected),
+		probeCell(10, row.Report.Local, lifecycle.ValueOK(row.Report.Local, row.Service.Check.LocalExpect()), selected),
+		probeCell(10, row.Report.Public, lifecycle.ValueOK(row.Report.Public, row.Service.Check.PublicExpect()), selected),
+		hostCell(row, selected),
 	)
-	if selected {
-		return style.Bar(line, width)
-	}
 	return line
 }
 
-func probeCell(width int, value string, ok bool) string {
+func probeFaint(value string) bool {
+	switch value {
+	case "skip", "-", "":
+		return true
+	default:
+		return false
+	}
+}
+
+func probeCell(width int, value string, ok bool, selected bool) string {
+	cell := fmt.Sprintf("%-*s", width, value)
 	if value == "…" {
-		return style.Faint(fmt.Sprintf("%-*s", width, value))
+		if selected {
+			return style.BoldWhite(cell)
+		}
+		return style.Faint(cell)
+	}
+	if selected {
+		if probeFaint(value) {
+			return style.BoldWhite(cell)
+		}
+		return style.ProbeEmph(width, value, ok)
 	}
 	return style.Probe(width, value, ok)
 }
 
-func hostCell(row Row) string {
+func hostCell(row Row, selected bool) string {
 	if row.Report.Host == "…" {
+		if selected {
+			return style.BoldWhite("…")
+		}
 		return style.Faint("…")
+	}
+	if selected {
+		return style.HostEmph(row.Report.Host)
 	}
 	return style.Host(row.Report.Host)
 }
@@ -248,7 +264,7 @@ func (m model) renderDetail(row Row) string {
 	}
 	writeField(&b, "local", endpoint+" → "+s.Local)
 	writeField(&b, "serve", row.Serve)
-	writeField(&b, "host", hostCell(row))
+	writeField(&b, "host", hostCell(row, false))
 	req := "(none)"
 	if len(s.Requires) > 0 {
 		req = strings.Join(s.Requires, ", ")

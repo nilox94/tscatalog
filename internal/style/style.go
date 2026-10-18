@@ -14,12 +14,17 @@ import (
 )
 
 var (
-	good  = lipgloss.NewStyle().Foreground(lipgloss.Green)
-	warn  = lipgloss.NewStyle().Foreground(lipgloss.Yellow)
-	bad   = lipgloss.NewStyle().Foreground(lipgloss.Red)
-	key   = lipgloss.NewStyle().Foreground(lipgloss.Blue)
-	faint = lipgloss.NewStyle().Faint(true)
-	bold  = lipgloss.NewStyle().Bold(true)
+	good      = lipgloss.NewStyle().Foreground(lipgloss.Green)
+	warn      = lipgloss.NewStyle().Foreground(lipgloss.Yellow)
+	bad       = lipgloss.NewStyle().Foreground(lipgloss.Red)
+	key       = lipgloss.NewStyle().Foreground(lipgloss.Blue)
+	faint     = lipgloss.NewStyle().Faint(true)
+	bold      = lipgloss.NewStyle().Bold(true)
+	selectMark = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Blue)
+	boldGood  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Green)
+	boldWarn  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Yellow)
+	boldBad   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Red)
+	boldWhite = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.White)
 )
 
 // Writer downgrades or strips ANSI from the environment and the destination.
@@ -36,6 +41,9 @@ func Faint(s string) string { return faint.Render(s) }
 // Key marks a keyboard shortcut in a shortcut bar.
 func Key(s string) string { return key.Render(s) }
 
+// SelectMark is the bold blue row cursor in cat9s.
+func SelectMark(s string) string { return selectMark.Render(s) }
+
 // Good marks a successful or steady state.
 func Good(s string) string { return good.Render(s) }
 
@@ -45,14 +53,14 @@ func Warn(s string) string { return warn.Render(s) }
 // Bad marks a failed probe or a process that is down.
 func Bad(s string) string { return bad.Render(s) }
 
-// Bar paints the selected row. width pads the line so the highlight is a full bar.
-func Bar(s string, width int) string {
-	st := lipgloss.NewStyle().Reverse(true)
-	if width > 0 {
-		st = st.Width(width)
-	}
-	return st.Render(s)
-}
+// BoldBad is Bad with emphasis for a selected table row.
+func BoldBad(s string) string { return boldBad.Render(s) }
+
+// BoldWarn is Warn with emphasis for a selected table row.
+func BoldWarn(s string) string { return boldWarn.Render(s) }
+
+// BoldWhite is faint table text on the selected row.
+func BoldWhite(s string) string { return boldWhite.Render(s) }
 
 // Action pads a plan action to 8 columns, then colors the padded cell.
 // Padding comes first so ANSI codes do not shift the column.
@@ -73,23 +81,53 @@ func Action(action string) string {
 // Probe pads a health cell, then colors success green and failure red.
 // skip, "-", and empty stay faint.
 func Probe(width int, value string, ok bool) string {
+	return probeCell(width, value, ok, false)
+}
+
+// ProbeEmph is Probe with bold for the selected table row.
+func ProbeEmph(width int, value string, ok bool) string {
+	return probeCell(width, value, ok, true)
+}
+
+func probeCell(width int, value string, ok bool, emph bool) string {
 	cell := fmt.Sprintf("%-*s", width, value)
 	switch value {
 	case "skip", "-", "":
+		if emph {
+			return boldWhite.Render(cell)
+		}
 		return faint.Render(cell)
 	}
 	if ok {
+		if emph {
+			return boldGood.Render(cell)
+		}
 		return good.Render(cell)
+	}
+	if emph {
+		return boldBad.Render(cell)
 	}
 	return bad.Render(cell)
 }
 
 // Host colors the approvalLevel and configured words of an approval summary.
 func Host(summary string) string {
+	return hostSummary(summary, false)
+}
+
+// HostEmph is Host with bold for the selected table row.
+func HostEmph(summary string) string {
+	return hostSummary(summary, true)
+}
+
+func hostSummary(summary string, emph bool) string {
 	switch summary {
 	case "", "-", "(no host advertised)", "(approval unavailable)":
 		if summary == "" {
 			return ""
+		}
+		if emph {
+			return boldWhite.Render(summary)
 		}
 		return faint.Render(summary)
 	}
@@ -97,23 +135,35 @@ func Host(summary string) string {
 	for i, part := range parts {
 		level, cfg, ok := strings.Cut(part, " / ")
 		if !ok {
-			parts[i] = hostWord(part)
+			parts[i] = hostWord(part, emph)
 			continue
 		}
-		parts[i] = hostWord(level) + " / " + hostWord(cfg)
+		parts[i] = hostWord(level, emph) + " / " + hostWord(cfg, emph)
 	}
 	return strings.Join(parts, "; ")
 }
 
-func hostWord(s string) string {
+func hostWord(s string, emph bool) string {
 	switch s {
 	case "approved", "ready":
+		if emph {
+			return boldGood.Render(s)
+		}
 		return good.Render(s)
 	case "draining":
+		if emph {
+			return boldWarn.Render(s)
+		}
 		return warn.Render(s)
 	case "not-approved":
+		if emph {
+			return boldBad.Render(s)
+		}
 		return bad.Render(s)
 	default:
+		if emph {
+			return boldWhite.Render(s)
+		}
 		return faint.Render(s)
 	}
 }
