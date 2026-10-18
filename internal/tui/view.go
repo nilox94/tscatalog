@@ -41,9 +41,9 @@ func (m model) render() string {
 	if m.filtering {
 		fmt.Fprintf(&b, "%s %s█\n", style.Bold("/"), m.filter)
 	} else if m.detail {
-		fmt.Fprintln(&b, style.Faint(detailBar))
+		fmt.Fprintln(&b, renderDetailBar())
 	} else {
-		fmt.Fprintln(&b, style.Faint(keyBar))
+		fmt.Fprintln(&b, renderKeyBar())
 	}
 	fmt.Fprintln(&b, summary(m.rows, m.filter))
 	fmt.Fprintln(&b, paintStatus(m.status))
@@ -268,7 +268,7 @@ func (m model) renderLogs() string {
 	if m.logFiltering {
 		fmt.Fprintf(&b, "%s %s█\n", style.Bold("/"), m.logFilter)
 	} else {
-		fmt.Fprintln(&b, style.Faint(logBar))
+		fmt.Fprintln(&b, renderLogBar())
 	}
 	fmt.Fprintln(&b, paintStatus(m.status))
 	lines := filterLogLines(m.logLines, m.logFilter)

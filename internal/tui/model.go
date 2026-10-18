@@ -14,12 +14,6 @@ import (
 	"tscatalog/internal/lifecycle"
 )
 
-const (
-	keyBar    = "r restart  R restart all  x stop  l logs  / filter  enter describe  q quit"
-	detailBar = "esc back  q quit"
-	logBar    = "f follow  / search  tab name  esc back"
-)
-
 // Loader fetches probes. Prepare runs once per pass; Probe runs per service
 // so the table can paint each row as it finishes.
 type Loader interface {

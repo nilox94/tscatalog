@@ -17,6 +17,7 @@ var (
 	good  = lipgloss.NewStyle().Foreground(lipgloss.Green)
 	warn  = lipgloss.NewStyle().Foreground(lipgloss.Yellow)
 	bad   = lipgloss.NewStyle().Foreground(lipgloss.Red)
+	key   = lipgloss.NewStyle().Foreground(lipgloss.Blue)
 	faint = lipgloss.NewStyle().Faint(true)
 	bold  = lipgloss.NewStyle().Bold(true)
 )
@@ -31,6 +32,9 @@ func Bold(s string) string { return bold.Render(s) }
 
 // Faint marks unchanged, missing, and secondary text.
 func Faint(s string) string { return faint.Render(s) }
+
+// Key marks a keyboard shortcut in a shortcut bar.
+func Key(s string) string { return key.Render(s) }
 
 // Good marks a successful or steady state.
 func Good(s string) string { return good.Render(s) }

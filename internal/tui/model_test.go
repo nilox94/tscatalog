@@ -6,21 +6,26 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/acarl005/stripansi"
 
 	"tscatalog/internal/catalog"
 	"tscatalog/internal/lifecycle"
 )
 
+func viewPlain(m model) string {
+	return stripansi.Strip(m.View().Content)
+}
+
 func TestKeyBarAndFilter(t *testing.T) {
 	m := testModel([]Row{svc("web", true, true), svc("api", true, false)})
-	if !strings.Contains(m.View().Content, keyBar) {
+	if !strings.Contains(viewPlain(m), keyBarPlain) {
 		t.Fatalf("missing key bar:\n%s", m.View().Content)
 	}
-	if !strings.Contains(m.View().Content, "1 needs restart") {
+	if !strings.Contains(viewPlain(m), "1 needs restart") {
 		t.Fatalf("summary:\n%s", m.View().Content)
 	}
-	webAt := strings.Index(m.View().Content, "web")
-	apiAt := strings.Index(m.View().Content, "api")
+	webAt := strings.Index(viewPlain(m), "web")
+	apiAt := strings.Index(viewPlain(m), "api")
 	if apiAt < 0 || webAt < 0 || apiAt > webAt {
 		t.Fatalf("failing api should sort above web:\n%s", m.View().Content)
 	}
@@ -30,20 +35,20 @@ func TestKeyBarAndFilter(t *testing.T) {
 	if !m.filtering || m.filter != "w" {
 		t.Fatalf("filter %+v", m)
 	}
-	if strings.Contains(m.View().Content, keyBar) {
+	if strings.Contains(viewPlain(m), keyBarPlain) {
 		t.Fatal("key bar should yield to the filter prompt")
 	}
-	if !strings.Contains(m.View().Content, "w█") {
+	if !strings.Contains(viewPlain(m), "w█") {
 		t.Fatalf("prompt:\n%s", m.View().Content)
 	}
 	m, _ = m.onKey("enter")
 	if m.filtering || m.filter != "w" {
 		t.Fatalf("enter should keep the filter, got %q filtering=%v", m.filter, m.filtering)
 	}
-	if !strings.Contains(m.View().Content, keyBar) {
+	if !strings.Contains(viewPlain(m), keyBarPlain) {
 		t.Fatal("key bar should return after enter")
 	}
-	if strings.Contains(m.View().Content, "api") {
+	if strings.Contains(viewPlain(m), "api") {
 		t.Fatal("filter should hide api")
 	}
 	m, _ = m.onKey("esc")
@@ -179,8 +184,8 @@ func TestDescribeAndQuit(t *testing.T) {
 	m.rows[0].Serve = "tcp:443 → http://127.0.0.1:8080"
 	m.rows[0].Service.Requires = []string{"db"}
 	next, _ := m.onKey("enter")
-	body := next.View().Content
-	for _, want := range []string{"svc:web", "https://web.example.ts.net", "tcp:443 → http://127.0.0.1:8080", "db", detailBar} {
+	body := stripansi.Strip(next.View().Content)
+	for _, want := range []string{"svc:web", "https://web.example.ts.net", "tcp:443 → http://127.0.0.1:8080", "db", detailBarPlain} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("detail missing %q\n%s", want, body)
 		}
@@ -258,8 +263,8 @@ func TestCursorStaysOnScreenWhenRowJumpsAboveViewport(t *testing.T) {
 }
 
 func cursorLine(body string) string {
-	for _, line := range strings.Split(body, "\n") {
-		if strings.Contains(line, ">") {
+	for _, line := range strings.Split(stripansi.Strip(body), "\n") {
+		if len(line) >= 2 && line[0] == '>' && line[1] == ' ' {
 			return line
 		}
 	}
