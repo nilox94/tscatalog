@@ -44,6 +44,8 @@ type LaunchStatus struct {
 	State   LaunchState
 	PID     int
 	Detail  string
+	// Command is the running argv for a process or container row.
+	Command string
 }
 
 // LaunchStatuses reports one row per process, one row per container, or one
@@ -193,6 +195,7 @@ func composeStatus(ctx context.Context, s catalog.Service, index int, spec catal
 	if len(children) == 0 {
 		return []LaunchStatus{placeholder(LaunchState(roll.State), roll.Detail)}
 	}
+	comp.EnrichCommands(ctx, children)
 	out := make([]LaunchStatus, 0, len(children))
 	for _, child := range children {
 		out = append(out, LaunchStatus{
@@ -202,6 +205,7 @@ func composeStatus(ctx context.Context, s catalog.Service, index int, spec catal
 			Shape:   ShapeContainer,
 			State:   LaunchState(child.State),
 			Detail:  child.Detail,
+			Command: child.Command,
 		})
 	}
 	return out
@@ -214,29 +218,16 @@ func composeErr(err error) string {
 	return err.Error()
 }
 
-// Describe is the describe/cat9s field for one row.
-// The key is process, container, or external. The value omits an empty id.
-func (st LaunchStatus) Describe() (key, value string) {
-	switch st.Shape {
-	case ShapeProcess:
-		key = "process"
-	case ShapeContainer:
-		key = "container"
-	default:
-		key = "external"
+// DescribeParts is the describe/cat9s field for one row.
+// The key is process, container, or external. Command is set only while running.
+func (st LaunchStatus) DescribeParts() (key, status, command string) {
+	kind, name, stStatus, command := st.TableParts()
+	key = kind
+	status = stStatus
+	if name != "-" {
+		status = name + "  " + status
 	}
-	var parts []string
-	if st.ID != "" {
-		parts = append(parts, st.ID)
-	}
-	parts = append(parts, string(st.State))
-	if st.State == LaunchRunning && st.PID != 0 {
-		parts = append(parts, fmt.Sprintf("pid %d", st.PID))
-	}
-	if st.Detail != "" {
-		parts = append(parts, st.Detail)
-	}
-	return key, strings.Join(parts, "  ")
+	return key, status, command
 }
 
 // FormatPS renders the ps table. Empty id and shape print as "-". PID 0 prints as "-".

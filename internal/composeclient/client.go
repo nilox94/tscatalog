@@ -16,11 +16,13 @@ import (
 	"github.com/docker/cli/cli/flags"
 	composeapi "github.com/docker/compose/v5/pkg/api"
 	sdk "github.com/docker/compose/v5/pkg/compose"
+	mobyclient "github.com/moby/moby/client"
 )
 
 // Client is one Compose SDK session.
 type Client struct {
-	api composeapi.Compose
+	api    composeapi.Compose
+	docker mobyclient.APIClient
 }
 
 // New connects a Compose service to the local Docker CLI defaults.
@@ -61,7 +63,7 @@ func newClient() (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{api: svc}, nil
+	return &Client{api: svc, docker: dockerCli.Client()}, nil
 }
 
 // Load reads a compose project. An empty dir is the current directory.

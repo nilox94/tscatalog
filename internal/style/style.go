@@ -25,6 +25,7 @@ var (
 	boldWarn  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Yellow)
 	boldBad   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Red)
 	boldWhite = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.White)
+	command   = lipgloss.NewStyle().Background(lipgloss.Color("#000000")).Foreground(lipgloss.White)
 )
 
 // Writer downgrades or strips ANSI from the environment and the destination.
@@ -61,6 +62,31 @@ func BoldWarn(s string) string { return boldWarn.Render(s) }
 
 // BoldWhite is faint table text on the selected row.
 func BoldWhite(s string) string { return boldWhite.Render(s) }
+
+// Command is a running argv on an explicit black background.
+func Command(s string) string { return command.Render(s) }
+
+// CommandCell paints a running argv, truncated to width runes with an ellipsis.
+func CommandCell(width int, cmd string) string {
+	if cmd == "" {
+		return ""
+	}
+	return Command(truncateRunes(cmd, width))
+}
+
+func truncateRunes(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	r := []rune(s)
+	if len(r) < width {
+		return s
+	}
+	if width == 1 {
+		return "…"
+	}
+	return string(r[:width-1]) + "…"
+}
 
 // Action pads a plan action to 8 columns, then colors the padded cell.
 // Padding comes first so ANSI codes do not shift the column.

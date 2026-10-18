@@ -17,6 +17,8 @@ type StateDetail struct {
 // when that service appears more than once.
 type ContainerLine struct {
 	ID, State, Detail string
+	ContainerID       string
+	Command           string
 }
 
 // ContainerLines rolls container rows into a project state and one line each.
@@ -44,9 +46,10 @@ func ContainerLines(rows []composeapi.ContainerSummary) (roll StateDetail, child
 			id = row.Service + "#" + strconv.Itoa(seen[row.Service])
 		}
 		children = append(children, ContainerLine{
-			ID:     id,
-			State:  childState(row),
-			Detail: childDetail(row),
+			ID:          id,
+			State:       childState(row),
+			Detail:      childDetail(row),
+			ContainerID: row.ID,
 		})
 	}
 	switch {

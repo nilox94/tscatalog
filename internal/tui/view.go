@@ -272,9 +272,8 @@ func (m model) renderDetail(row Row) string {
 	writeField(&b, "requires", req)
 	writeField(&b, "bind", row.Report.Bind)
 	writeField(&b, "probe", "local "+row.Report.Local+"  public "+row.Report.Public)
-	for _, st := range row.Launches {
-		key, value := st.Describe()
-		writeField(&b, key, value)
+	if table := lifecycle.FormatLaunchTable(row.Launches); table != "" {
+		b.WriteString(table)
 	}
 	return b.String()
 }

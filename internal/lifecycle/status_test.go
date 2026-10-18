@@ -29,6 +29,39 @@ func TestLaunchStatusUnwatched(t *testing.T) {
 	}
 }
 
+func TestDescribePartsCommand(t *testing.T) {
+	key, status, cmd := (LaunchStatus{
+		Shape:   ShapeProcess,
+		State:   LaunchRunning,
+		PID:     42,
+		Command: "/bin/app --flag",
+		Detail:  "/bin/app --flag",
+	}).DescribeParts()
+	if key != "process" || cmd != "/bin/app --flag" {
+		t.Fatalf("key=%q status=%q cmd=%q", key, status, cmd)
+	}
+	if strings.Contains(status, "/bin/app") {
+		t.Fatalf("status should omit duplicated command: %q", status)
+	}
+	if !strings.Contains(status, "pid 42") {
+		t.Fatalf("status %q", status)
+	}
+	key, status, cmd = (LaunchStatus{
+		Shape:   ShapeContainer,
+		ID:      "app",
+		State:   LaunchRunning,
+		Detail:  "healthy",
+		Command: "/usr/sbin/nginx",
+	}).DescribeParts()
+	if key != "container" || cmd != "/usr/sbin/nginx" || !strings.Contains(status, "healthy") {
+		t.Fatalf("key=%q status=%q cmd=%q", key, status, cmd)
+	}
+	_, _, cmd = (LaunchStatus{Shape: ShapeProcess, State: LaunchExited, Command: "leftover"}).DescribeParts()
+	if cmd != "" {
+		t.Fatalf("exited cmd %q", cmd)
+	}
+}
+
 func TestFormatPS(t *testing.T) {
 	got := FormatPS([]LaunchStatus{
 		{

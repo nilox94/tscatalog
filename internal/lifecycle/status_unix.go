@@ -21,7 +21,8 @@ func processStatus(s catalog.Service, index int, spec catalog.LaunchSpec) Launch
 	if err == nil && sameProcess(rec.PID, rec.StartID) {
 		st.State = LaunchRunning
 		st.PID = rec.PID
-		st.Detail = strings.Join(spec.Start, " ")
+		st.Command = strings.Join(spec.Start, " ")
+		st.Detail = st.Command
 		return st
 	}
 	exitfile, perr := exitPath(s.Name, spec.ID(index))

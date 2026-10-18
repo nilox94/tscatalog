@@ -488,9 +488,8 @@ func printShow(ctx context.Context, w io.Writer, s catalog.Service, endpoint str
 	if approval != "" {
 		field(w, "host", style.Host(approval))
 	}
-	for _, st := range lifecycle.LaunchStatuses(ctx, s, comp, dialErr) {
-		key, value := st.Describe()
-		field(w, key, value)
+	if table := lifecycle.FormatLaunchTable(lifecycle.LaunchStatuses(ctx, s, comp, dialErr)); table != "" {
+		fmt.Fprint(w, table)
 	}
 }
 
