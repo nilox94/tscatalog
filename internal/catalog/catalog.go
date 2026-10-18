@@ -54,6 +54,7 @@ type Service struct {
 	Comment     string   `yaml:"comment"`
 	Requires    []string `yaml:"requires,omitempty"`
 	Unpublished bool     `yaml:"unpublished,omitempty"`
+	Autostart   bool     `yaml:"autostart,omitempty"`
 	Launch      Launch   `yaml:"launch"`
 	Check       Check    `yaml:"check"`
 }
@@ -145,8 +146,22 @@ func (f *File) Validate() error {
 		if err := s.Launch.Validate(); err != nil {
 			return fmt.Errorf("service %q: %w", s.Name, err)
 		}
+		if s.Autostart && !s.Launch.Defined() {
+			return fmt.Errorf("service %q: autostart requires launch", s.Name)
+		}
 	}
 	return validateRequires(f)
+}
+
+// AutostartNames is the catalog names with autostart: true, in file order.
+func (f *File) AutostartNames() []string {
+	var names []string
+	for _, s := range f.Services {
+		if s.Autostart {
+			names = append(names, s.Name)
+		}
+	}
+	return names
 }
 
 func validateLocal(local string) error {

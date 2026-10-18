@@ -37,6 +37,7 @@ services:
     displayName: Example API
     local: http://127.0.0.1:8081
     comment: Detach a long-running process (Unix); logs/pidfiles in XDG state dir
+    autostart: true
     launch:
       cwd: ~/src/api
       start: [api, serve, --bind, 127.0.0.1:8081]

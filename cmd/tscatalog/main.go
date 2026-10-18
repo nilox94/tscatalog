@@ -55,6 +55,7 @@ func main() {
 func newRootCmd() *cobra.Command {
 	var file string
 	var cat *catalog.File
+	var catPath string
 
 	root := &cobra.Command{
 		Use:           "tscatalog",
@@ -63,7 +64,8 @@ func newRootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
-			catPath, err := catalog.ResolvePath(file)
+			var err error
+			catPath, err = catalog.ResolvePath(file)
 			if err != nil {
 				return err
 			}
@@ -209,8 +211,73 @@ logs <service> <name> uses the NAME column from ps.
 	}
 	logsCmd.Flags().BoolVarP(&follow, "follow", "f", false, "keep reading until interrupted")
 	logsCmd.Flags().IntVar(&tail, "tail", 100, "lines to show (-1 is all)")
-	root.AddCommand(ps, logsCmd)
+	root.AddCommand(ps, logsCmd, newAutostartCmd(func() *catalog.File { return cat }, func() string { return catPath }))
 	return root
+}
+
+func newAutostartCmd(cat func() *catalog.File, catalogFile func() string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "autostart",
+		Short: "Start services flagged autostart (local only)",
+		Long: `Starts every catalog service with autostart: true, plus their requires,
+the same way as up --local. No VIP, Serve, advertise, or ACL writes.
+
+On macOS, install writes one login LaunchAgent that runs this command.
+The agent is one-shot (no KeepAlive): stop leaves the process down until
+the next up, restart, or login.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runAutostart(cmd.Context(), cat())
+		},
+	}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "install",
+		Short: "Install the macOS login agent (snapshots PATH and catalog path)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runAutostartInstall(catalogFile())
+		},
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "uninstall",
+		Short: "Remove the macOS login agent",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return lifecycle.UninstallLoginAgent()
+		},
+	})
+	return cmd
+}
+
+func runAutostart(ctx context.Context, cat *catalog.File) error {
+	names := cat.AutostartNames()
+	if len(names) == 0 {
+		fmt.Fprintln(os.Stderr, "no services with autostart: true")
+		return nil
+	}
+	return runUp(ctx, cat, names, false)
+}
+
+func runAutostartInstall(catalogFile string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	logf, err := lifecycle.AutostartLogPath()
+	if err != nil {
+		return err
+	}
+	pathEnv := os.Getenv("PATH")
+	if err := lifecycle.InstallLoginAgent(lifecycle.LoginAgent{
+		Executable: exe,
+		Catalog:    catalogFile,
+		Path:       pathEnv,
+		Log:        logf,
+	}); err != nil {
+		return err
+	}
+	fmt.Fprintf(style.Writer(os.Stdout), "installed %s (PATH and TSCATALOG_CATALOG snapshotted)\n", lifecycle.AgentLabel)
+	return nil
 }
 
 func runPlan(ctx context.Context, cat *catalog.File) error {
@@ -374,6 +441,9 @@ func printShow(ctx context.Context, w io.Writer, s catalog.Service, endpoint str
 	}
 	if s.Unpublished {
 		field(w, "publish", style.Faint("loopback only (unpublished)"))
+	}
+	if s.Autostart {
+		field(w, "autostart", "login")
 	}
 	url := "https://" + s.TailscaleLabel() + ".<tailnet>.ts.net"
 	if suffix != "" {

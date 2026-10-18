@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"strings"
 	"testing"
 
 	"tscatalog/internal/catalog"
@@ -52,6 +53,25 @@ func TestCatalogOwnsStopArgv(t *testing.T) {
 	s := catalog.Service{Launch: catalog.Launch{{Start: []string{"start"}, Stop: []string{"stop"}}}}
 	if !CatalogOwns(s) {
 		t.Fatal("stop argv should count as owned")
+	}
+}
+
+func TestCatalogOwnsExternalWithoutStop(t *testing.T) {
+	s := catalog.Service{Launch: catalog.Launch{{Start: []string{"install"}}}}
+	if CatalogOwns(s) {
+		t.Fatal("external helper without stop is not owned")
+	}
+}
+
+func TestDecideForeignWedgeWhenNotOwned(t *testing.T) {
+	s := catalog.Service{
+		Name:   "helper",
+		Local:  "http://127.0.0.1:8080",
+		Launch: catalog.Launch{{Start: []string{"install"}}},
+	}
+	got := Decide(s, Report{Bind: ":8080", Local: "500", OK: false}, CatalogOwns(s))
+	if got.Action != ActionNone || !strings.Contains(got.Note, "something else holds") {
+		t.Fatalf("got action=%d note=%q", got.Action, got.Note)
 	}
 }
 

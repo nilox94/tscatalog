@@ -72,7 +72,7 @@ func TestLoadDottedServiceName(t *testing.T) {
 	raw := []byte(`
 endpoint: tcp:443
 services:
-  - name: clickstack.momoma
+  - name: foo.bar
     local: http://127.0.0.1:8080
 `)
 	if err := os.WriteFile(path, raw, 0o644); err != nil {
@@ -82,7 +82,7 @@ services:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.Services[0].SVCName() != "svc:clickstack-momoma" {
+	if f.Services[0].SVCName() != "svc:foo-bar" {
 		t.Fatalf("svc name %q", f.Services[0].SVCName())
 	}
 }
@@ -169,6 +169,48 @@ services:
 	}
 	if _, err := Load(path); err == nil {
 		t.Fatal("expected duplicate label error")
+	}
+}
+
+func TestAutostartRequiresLaunch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "catalog.yaml")
+	if err := os.WriteFile(path, []byte(`
+endpoint: tcp:443
+services:
+  - name: web
+    local: http://127.0.0.1:8080
+    autostart: true
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected autostart without launch to fail")
+	}
+}
+
+func TestAutostartNames(t *testing.T) {
+	f := &File{
+		Endpoint: DefaultEndpoint,
+		Services: []Service{
+			{Name: "web", Local: "http://127.0.0.1:8080", Launch: Launch{{Start: []string{"x"}}}},
+			{Name: "api", Local: "http://127.0.0.1:8081", Autostart: true, Requires: []string{"db"}, Launch: Launch{{Start: []string{"y"}, Detach: true}}},
+			{Name: "db", Local: "http://127.0.0.1:8082", Launch: Launch{{Start: []string{"z"}, Detach: true}}},
+		},
+	}
+	if err := f.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	names := f.AutostartNames()
+	if len(names) != 1 || names[0] != "api" {
+		t.Fatalf("autostart names %v", names)
+	}
+	got, err := f.ExpandForRuntime(names)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Name != "db" || got[1].Name != "api" {
+		t.Fatalf("runtime %v", []string{got[0].Name, got[1].Name})
 	}
 }
 

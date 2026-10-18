@@ -11,7 +11,7 @@ import (
 
 func TestLaunchStatusUnwatched(t *testing.T) {
 	s := catalog.Service{
-		Name: "ompweb",
+		Name: "helper",
 		Launch: catalog.Launch{{
 			Start: []string{"helper", "start"},
 			Stop:  []string{"helper", "stop"},
@@ -32,12 +32,12 @@ func TestLaunchStatusUnwatched(t *testing.T) {
 func TestFormatPS(t *testing.T) {
 	got := FormatPS([]LaunchStatus{
 		{
-			Service: "ompweb",
+			Service: "helper",
 			State:   LaunchUnwatched,
 			Detail:  "no status command",
 		},
 		{
-			Service: "clickstack",
+			Service: "stack",
 			ID:      "app",
 			Shape:   ShapeContainer,
 			State:   LaunchRunning,
@@ -48,14 +48,14 @@ func TestFormatPS(t *testing.T) {
 	if !strings.HasPrefix(got, header+"\n") {
 		t.Fatalf("header:\n%s", got)
 	}
-	if !strings.Contains(got, "ompweb") || !strings.Contains(got, "-") {
+	if !strings.Contains(got, "helper") || !strings.Contains(got, "-") {
 		t.Fatalf("external row:\n%s", got)
 	}
 	lines := strings.Split(strings.TrimRight(got, "\n"), "\n")
 	if len(lines) != 3 {
 		t.Fatalf("lines %d\n%s", len(lines), got)
 	}
-	if !strings.Contains(lines[1], "ompweb") || !strings.Contains(lines[1], "-") {
+	if !strings.Contains(lines[1], "helper") || !strings.Contains(lines[1], "-") {
 		t.Fatalf("external %q", lines[1])
 	}
 	// shape and pid of a single unnamed external row are dashes

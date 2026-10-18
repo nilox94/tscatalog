@@ -1,21 +1,17 @@
 # tscatalog
 
-Named Tailscale Services as code. Copy `catalog.example.yaml` to your catalog file and edit.
+Named Tailscale Services as code. Copy `catalog.example.yaml` and edit.
 
-Default catalog path: `$XDG_CONFIG_HOME/tscatalog/catalog.yaml` (or `~/.config/tscatalog/catalog.yaml`).
-Resolution order without `-f`: `TSCATALOG_CATALOG` → XDG config → `./catalog.yaml` in the current directory.
-Put a gitignored `.env` next to the catalog for API keys (see `.env.example`).
-The Go binary talks to the [VIP Services API](https://pkg.go.dev/tailscale.com/client/tailscale/v2#ServicesResource) (`tailscale.com/client/tailscale/v2`) and maps each service on this host with `tailscale serve --service --https`.
+Catalog (`-f` unset): `TSCATALOG_CATALOG` → `$XDG_CONFIG_HOME/tscatalog/catalog.yaml` → `~/.config/tscatalog/catalog.yaml` → `./catalog.yaml`.
+Auth: gitignored `.env` next to the catalog (`.env.example`). `TAILSCALE_API_KEY` or OAuth id/secret. Tailnet `-`. Not stored in the catalog.
 
-Public URL is always `https://<tailscale-label>.<tailnet>.ts.net` on **443**.
-Tailscale only accepts a single DNS label, so the VIP label defaults to dots → hyphens unless you set `vip:` explicitly.
-Local ports stay on loopback and never go in the Service definition.
+VIP Services API + `tailscale serve --service --https`. Public URL is always `https://<label>.<tailnet>.ts.net` **443**. `vip:` is one DNS label (default: dots in `name` → hyphens). Local bind stays loopback; it is not in the Service.
 
-A catalog **name** is the key you pass to commands. **vip** is the single DNS label (default: dots in the name become hyphens). **svc:** is the Tailscale API name (`svc:` plus the vip label). Commands accept any of the three.
+IDs (any works as a command argument): **name** (catalog key) · **vip** (DNS label) · **svc:** (`svc:` + vip).
 
 ```
 go run ./cmd/tscatalog up                # start + apply + health
-go run ./cmd/tscatalog up web --local    # start + health, no tailnet writes
+go run ./cmd/tscatalog up web --local    # start + health
 go run ./cmd/tscatalog health
 go run ./cmd/tscatalog stop web
 go run ./cmd/tscatalog plan
@@ -23,43 +19,44 @@ go run ./cmd/tscatalog apply --dry-run
 go run ./cmd/tscatalog apply web
 go run ./cmd/tscatalog list
 go run ./cmd/tscatalog describe web
+go run ./cmd/tscatalog autostart
+go install ./cmd/tscatalog && tscatalog autostart install
 go run ./cmd/cat9s
 ```
 
-`cat9s` is a separate full-screen browser. Published services that are down or unhealthy are listed first, with a count of how many need a restart. `/` filters by name. `r` restarts the selected service and `R` restarts every visible one in that set. A dead process is started. A process that is listening but failing its local check is stopped and started only when this catalog launched it (a stop argv, or a live detached pid). A port held by something else is left alone. Host `not-approved` or `draining` is not a restart. `x` stops only that service, and Enter opens its `describe` fields. A command that fails opens the error along the bottom; esc closes it. `requires` start first and are not published. `cat9s` does not write VIP Services, Serve, or the ACL, and it needs a terminal.
+## cat9s
 
-`up`, `stop`, and `health` read optional `launch` and `check` on each catalog row.
-`launch.start` is argv (not a shell).
-A helper that returns when ready (`my-web start`, a service-manager installer) stays in the foreground.
-Long-running processes (`npm run dev`) set `detach: true` (Unix only): logs and pidfiles under `$XDG_STATE_HOME/tscatalog/` or `~/.local/state/tscatalog/` (`logs/` and `run/`). Without `detach`, launch is a helper that returns when the listener is up (service manager, container, etc.); `stop` runs that helper’s stop argv.
-Several specs (a list) start in order — UI + API on one named URL.
+Separate TUI. Needs a terminal. No VIP / Serve / ACL writes.
 
-`requires` lists other catalog names that must be running first. `up momoma` starts
-those dependencies locally, then Momoma, but only publishes and probes the names you
-gave (dependencies are not advertised). `stop momoma` stops only Momoma — shared
-dependencies keep running.
+- failures first (published, down or unhealthy); restart count
+- `/` filter · Enter describe · `x` stop that row · esc error banner
+- `r` / `R`: start if down; stop+start if owned (stop argv or live detached pid) and local check fails; skip foreign port, `not-approved`, `draining`
+- `requires` start first, not published
 
-`unpublished: true` keeps a row in the catalog for launch and health, but skips VIP,
-Serve, advertise, and ACL grants (loopback-only observability stacks).
+## launch
 
-`health` probes the local bind, optional local HTTP (`check.path` / `expect`), the public `https://<vip>.<tailnet>.ts.net` URL (`check.public`, default 200/3xx), and Tailscale host approval.
-502 means Serve is up and the process is down.
-Timeout usually means the host is not approved.
+`up` / `stop` / `health` read optional `launch` and `check`. `start` is argv, not a shell. Several specs: start in order.
 
-`up` is launch → apply → health. Names limit launch, VIP puts, Serve, steady-state advertise, and probes. The ACL merge is always the whole catalog; after an ACL write, every service is drained and advertised. `--local` skips apply. A repeated `up` does not relaunch when something is already listening on `local`.
+| kind | how |
+| --- | --- |
+| `detach: true` (Unix) | long-running; pidfile + log under `$XDG_STATE_HOME/tscatalog` or `~/.local/state/tscatalog` (`run/`, `logs/`) |
+| no detach | helper that returns when ready; `stop` is its stop argv |
+| no `stop` | another manager owns the listener; `up` may still run `start`; cat9s will not restart a live port |
 
-Control-plane auth: `TAILSCALE_API_KEY` in the environment, or in a gitignored `.env` next to the catalog file (see `.env.example`).
-OAuth client id/secret also works.
-Tailnet defaults to `-`. This repo does not store a tailnet name.
+`requires:` start locally first. `up app` publishes/probes only named rows. `stop app` does not stop shared deps.
 
-`apply` also merges the tailnet ACL:
-it fills `tagOwners` for `autoApproveHost`, stamps that tag on each VIP Service, and sets `autoApprovers.services["<that tag>"]` so tagged hosts are approved without a console click (`svc:*` is not a valid autoApprovers key).
-A 443 grant is added only if there is no catch-all `*:*` grant.
-Existing SSH, Funnel, routes, and other tags are left alone. `--no-policy` skips this; `--policy-only` applies just the ACL.
+`unpublished: true` — launch + health only; no VIP, Serve, advertise, ACL.
 
-The JSON ACL API may drop HuJSON comments on save. Dry-run first:
-`go run ./cmd/tscatalog apply --dry-run`.
+`autostart: true` — `tscatalog autostart` = `up --local` for those names (+ `requires`). macOS: `autostart install` writes `com.tscatalog.autostart` (`RunAtLoad`, no KeepAlive). Snapshots `PATH` and `TSCATALOG_CATALOG`. `go run` refused. `stop` stays down until `up` / restart / next login. `autostart uninstall` removes it.
 
-Pending host advertisements (`approvalLevel: not-approved`) do not route TailVIPs.
-`apply` merges policy *before* `tailscale serve advertise`, and drain/re-advertises after an ACL change so auto-approval can attach.
-`svc:*` is not a valid `autoApprovers.services` key; services are tagged with `autoApproveHost` instead.
+## health / up
+
+`health`: TCP bind · optional `check.path` / `expect` · public HTTPS (`check.public`, default 200/3xx) · host approval. 502 = Serve up, process down. Timeout ≈ host not approved.
+
+`up`: launch → apply → health. Names limit launch, VIP, Serve, steady-state advertise, probes. ACL is always whole-catalog; a policy write drains and advertises every service. `--local` skips apply. Already listening on `local` → no relaunch.
+
+## apply
+
+ACL merge: `tagOwners` for `autoApproveHost`, that tag on each VIP Service, `autoApprovers.services["<tag>"]` (`svc:*` is invalid). 443 grant only if no `*:*`. Leaves SSH, Funnel, routes, other tags. `--no-policy` / `--policy-only`.
+
+JSON ACL API may drop HuJSON comments — dry-run first. Policy merge before `tailscale serve advertise`. After ACL change: drain + re-advertise so auto-approval can attach. `not-approved` ads do not route TailVIPs.

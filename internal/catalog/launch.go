@@ -9,7 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Launch is one process spec or several (Momoma UI + API).
+// Launch is one process spec or several (UI + API).
 type Launch []LaunchSpec
 
 // Kind is the catalog discriminator for one start slot.
