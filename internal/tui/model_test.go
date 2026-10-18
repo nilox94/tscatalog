@@ -178,6 +178,14 @@ func TestFilterLogLines(t *testing.T) {
 	}
 }
 
+func TestEscQuitsFromMain(t *testing.T) {
+	m := testModel([]Row{svc("web", true, true)})
+	_, cmd := m.onKey("esc")
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatalf("esc on main should quit, got %T", cmd())
+	}
+}
+
 func TestDescribeAndQuit(t *testing.T) {
 	m := testModel([]Row{svc("web", true, true)})
 	m.rows[0].URL = "https://web.example.ts.net"

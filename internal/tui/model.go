@@ -400,8 +400,9 @@ func (m model) onKey(s string) (model, tea.Cmd) {
 		if m.filter != "" {
 			m.filter = ""
 			m.ensureVisible()
+			return m, nil
 		}
-		return m, nil
+		return m, tea.Quit
 	case "enter":
 		if _, ok := m.current(); ok {
 			m.detail = true
