@@ -246,7 +246,7 @@ func TestCursorFollowsServiceWhenRowJumps(t *testing.T) {
 func TestCursorStaysOnScreenWhenRowJumpsAboveViewport(t *testing.T) {
 	rows := make([]Row, 0, 20)
 	rows = append(rows, svc("web", true, false))
-	for i := 0; i < 18; i++ {
+	for i := range 18 {
 		rows = append(rows, svc(string(rune('a'+i)), true, true))
 	}
 	rows = append(rows, svc("open-design", true, true))

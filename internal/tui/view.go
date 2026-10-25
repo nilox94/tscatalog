@@ -63,8 +63,8 @@ func (m model) render() string {
 		start = end
 	}
 	shown := 0
-	for i := start; i < end; i++ {
-		fmt.Fprintln(&b, formatRow(rows[i], i == cursor, nameW))
+	for i, row := range rows[start:end] {
+		fmt.Fprintln(&b, formatRow(row, start+i == cursor, nameW))
 		shown++
 	}
 	writeBlank(&b, room-shown)
