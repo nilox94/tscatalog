@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"tscatalog/internal/catalog"
+	"tscatalog/internal/lifecycle"
 	"tscatalog/internal/tsapi"
 	"tscatalog/internal/tui"
 )
@@ -31,6 +32,13 @@ Catalog file (when -f is omitted): TSCATALOG_CATALOG, then
 $XDG_CONFIG_HOME/tscatalog/catalog.yaml, then ./catalog.yaml.`
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "__reap" {
+		if err := lifecycle.Reap(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := fang.Execute(context.Background(), newCmd()); err != nil {
 		os.Exit(1)
 	}

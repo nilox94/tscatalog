@@ -14,6 +14,7 @@ go run ./cmd/tscatalog up                # start + apply + health
 go run ./cmd/tscatalog up web --local    # start + health
 go run ./cmd/tscatalog health
 go run ./cmd/tscatalog stop web
+go run ./cmd/tscatalog restart web
 go run ./cmd/tscatalog plan
 go run ./cmd/tscatalog apply --dry-run
 go run ./cmd/tscatalog apply web
@@ -26,7 +27,7 @@ go run ./cmd/cat9s
 
 ## cat9s
 
-Separate TUI. Needs a terminal. No VIP / Serve / ACL writes.
+Separate TUI. Needs a terminal. `r` / `R` restart republish published rows (VIP, Serve, advertise); no other ACL writes.
 
 - failures first (published, down or unhealthy); restart count
 - `/` filter · Enter describe · `x` stop that row · esc error banner
@@ -58,5 +59,7 @@ Separate TUI. Needs a terminal. No VIP / Serve / ACL writes.
 ## apply
 
 ACL merge: `tagOwners` for `autoApproveHost`, that tag on each VIP Service, `autoApprovers.services["<tag>"]` (`svc:*` is invalid). 443 grant only if no `*:*`. Leaves SSH, Funnel, routes, other tags. `--no-policy` / `--policy-only`.
+
+Apply requests `access.autoApproveHost` on this machine (`tailscale up --advertise-tags`) before Serve. VIP hosts must be tagged nodes; `access.tagOwners` must allow whoever runs apply. If the tag stays pending, approve the device in the admin console.
 
 JSON ACL API may drop HuJSON comments — dry-run first. Policy merge before `tailscale serve advertise`. After ACL change: drain + re-advertise so auto-approval can attach. `not-approved` ads do not route TailVIPs.

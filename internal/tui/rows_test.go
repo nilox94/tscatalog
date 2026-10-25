@@ -18,7 +18,7 @@ func TestOrderPutsPublishedFailuresFirst(t *testing.T) {
 	if names(got) != "web,api,stack" {
 		t.Fatalf("order = %s", names(got))
 	}
-	if !needsRestart(got[0]) || needsRestart(got[1]) || needsRestart(got[2]) {
+	if !needsRestart(got[0]) || needsRestart(got[1]) || !needsRestart(got[2]) {
 		t.Fatalf("restart set = %v %v %v", needsRestart(got[0]), needsRestart(got[1]), needsRestart(got[2]))
 	}
 }

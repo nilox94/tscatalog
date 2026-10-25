@@ -66,6 +66,8 @@ func Decide(s catalog.Service, rep Report, owned bool) Decision {
 			return Decision{Note: "host is not-approved; restart will not fix it"}
 		case strings.Contains(rep.Host, "draining"):
 			return Decision{Note: "host is draining; restart will not fix it"}
+		case !rep.OK && owned:
+			return Decision{Action: ActionRestart}
 		default:
 			return Decision{Note: "local process is healthy"}
 		}

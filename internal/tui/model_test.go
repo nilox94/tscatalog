@@ -117,7 +117,7 @@ func TestBulkRestartSkipsHealthyAndUnpublished(t *testing.T) {
 	m.runner = run
 	_, cmd := m.onKey("R")
 	_ = cmd().(actionDone)
-	if len(run.bulk) != 1 || strings.Join(run.bulk[0], ",") != "web" {
+	if len(run.bulk) != 1 || strings.Join(run.bulk[0], ",") != "web,stack" {
 		t.Fatalf("bulk %v", run.bulk)
 	}
 }

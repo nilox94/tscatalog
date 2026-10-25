@@ -42,6 +42,7 @@ func (c ClientPolicy) Validate(ctx context.Context, acl tailscale.ACL) error {
 
 type Host interface {
 	GetConfig(ctx context.Context) (*catalog.ServeFile, error)
+	EnsureHostTags(ctx context.Context, tags []string) error
 	Serve(ctx context.Context, name, endpoint, local string) error
 	Advertise(ctx context.Context, svc string) error
 	Drain(ctx context.Context, svc string) error
@@ -103,11 +104,6 @@ func ComputePlan(want *catalog.File, have []tailscale.Service, serve *catalog.Se
 				Action: "unchanged",
 				Detail: "unpublished",
 			})
-			p.Host = append(p.Host, Change{
-				Name:   s.SVCName(),
-				Action: "unchanged",
-				Detail: "unpublished (loopback only)",
-			})
 			continue
 		}
 		desired := s.VIPService(want.Endpoint, want.HostTags())
@@ -133,6 +129,14 @@ func ComputePlan(want *catalog.File, have []tailscale.Service, serve *catalog.Se
 	wantServe := want.ServeConfig()
 	for _, s := range want.Services {
 		name := s.SVCName()
+		if !s.Published() {
+			p.Host = append(p.Host, Change{
+				Name:   name,
+				Action: "unchanged",
+				Detail: "unpublished (loopback only)",
+			})
+			continue
+		}
 		wantEP := wantServe.Services[name].Endpoints[want.Endpoint]
 		ch := Change{Name: name}
 		got, ok := serve.Services[name]
@@ -301,6 +305,11 @@ func Apply(ctx context.Context, want *catalog.File, api API, host Host, pol Poli
 	if opts.Host {
 		if host == nil {
 			return fmt.Errorf("local tailscale CLI required")
+		}
+		if tags := want.HostTags(); len(tags) > 0 {
+			if err := host.EnsureHostTags(ctx, tags); err != nil {
+				return fmt.Errorf("host identity: %w", err)
+			}
 		}
 		for i, s := range want.Services {
 			inScope := selected(opts.Names, s.Name)

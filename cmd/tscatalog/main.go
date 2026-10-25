@@ -176,9 +176,16 @@ a process that still holds that port.`,
 			return runUp(ctx, c, names, !localOnly)
 		})
 	up.Flags().BoolVar(&localOnly, "local", false, "start and probe only; skip VIP, Serve, advertise, and ACL")
+	restart := named("restart", "Stop then start selected services, then republish on the tailnet",
+		`When the local port is already open, restart stops the catalog-owned
+process first (stop argv, detached pid, or compose down), then starts again.
+Published services then get the same VIP, Serve, and advertise pass as apply
+for those names only. Unpublished services are local-only.`,
+		runRestart)
 	root.AddCommand(
 		up,
 		named("stop", "Run catalog stop argv, or SIGTERM a process tscatalog detached", "", runStop),
+		restart,
 		named("health", "Probe TCP + HTTP locally, HTTPS on the public URL, and host approval", "", runHealth),
 		named("describe", "Print catalog services with VIP, Serve, approval, and public URL",
 			"Arguments may be a catalog name, a vip label, or svc:<label>.", runDescribe),
@@ -302,25 +309,7 @@ func runPlan(ctx context.Context, cat *catalog.File) error {
 }
 
 func runApply(ctx context.Context, cat *catalog.File, opts syncer.Options) error {
-	var api syncer.API
-	var pol syncer.PolicyAPI
-	if opts.Tailnet || opts.Policy {
-		c, err := tsapi.NewClient()
-		if err != nil {
-			return err
-		}
-		if opts.Tailnet {
-			api = syncer.ClientAPI{Services: c.Services()}
-		}
-		if opts.Policy {
-			pol = syncer.ClientPolicy{Policy: c.PolicyFile()}
-		}
-	}
-	var h syncer.Host
-	if opts.Host {
-		h = host.CLI{}
-	}
-	if err := syncer.Apply(ctx, cat, api, h, pol, opts, style.Writer(os.Stdout)); err != nil {
+	if err := syncer.ApplyConfigured(ctx, cat, opts, style.Writer(os.Stdout)); err != nil {
 		return err
 	}
 	if !opts.DryRun {
@@ -623,6 +612,43 @@ func runStop(ctx context.Context, cat *catalog.File, names []string) error {
 	var first error
 	for _, s := range svcs {
 		if err := lifecycle.Stop(ctx, s, style.Writer(os.Stdout)); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			if first == nil {
+				first = err
+			}
+		}
+	}
+	return first
+}
+
+func runRestart(ctx context.Context, cat *catalog.File, names []string) error {
+	if len(names) == 0 {
+		names = shortNames(cat)
+	}
+	var first error
+	var restarted []string
+	w := style.Writer(os.Stdout)
+	for _, name := range names {
+		if err := lifecycle.Restart(ctx, cat, name, w); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			if first == nil {
+				first = err
+			}
+			continue
+		}
+		restarted = append(restarted, name)
+	}
+	if len(restarted) == 0 {
+		return first
+	}
+	ids, err := catalogIDs(cat, syncer.PublishedNames(cat, restarted))
+	if err != nil {
+		return err
+	}
+	if len(ids) > 0 {
+		if err := runApply(ctx, cat, syncer.Options{
+			Tailnet: true, Host: true, Advertise: true, Policy: true, Names: ids,
+		}); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			if first == nil {
 				first = err

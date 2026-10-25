@@ -15,9 +15,13 @@ access:
   src: [autogroup:member]
   # Tag on the host *and* on each VIP Service. autoApprovers uses this
   # tag as the service selector (svc:* is not valid).
+  # The machine running tscatalog must carry this tag (apply requests it
+  # via tailscale up --advertise-tags). User-authenticated devices cannot
+  # host VIP Services.
   autoApproveHost: tag:server
-  # Who may apply that tag. apply merges this into the live ACL
-  # (fills an empty tagOwners entry; does not remove other owners).
+  # Who may apply that tag to a device. Include identities that run apply
+  # (e.g. autogroup:member for self-hosted laptops, autogroup:admin for ops).
+  # apply merges this into the live ACL (fills empty tagOwners; keeps others).
   tagOwners: [autogroup:admin]
 
 services:

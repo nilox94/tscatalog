@@ -53,8 +53,12 @@ func attention(row Row) bool {
 // needsRestart is a published process failure that restart can fix.
 // Host approval and a port held by something else are not in this set.
 func needsRestart(row Row) bool {
-	if !row.Fresh || !row.Service.Published() {
+	if !row.Fresh || !row.Service.Launch.Defined() {
 		return false
+	}
+	if !row.Service.Published() {
+		return row.Report.Bind == "down" &&
+			lifecycle.Decide(row.Service, row.Report, row.Owned).Action != lifecycle.ActionNone
 	}
 	return lifecycle.Decide(row.Service, row.Report, row.Owned).Action != lifecycle.ActionNone
 }

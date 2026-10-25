@@ -120,14 +120,17 @@ func (f *fakePolicy) Set(context.Context, tailscale.ACL, string) error {
 func (f *fakePolicy) Validate(context.Context, tailscale.ACL) error { return nil }
 
 func (f *fakeHost) GetConfig(context.Context) (*catalog.ServeFile, error) { return f.cfg, nil }
+func (f *fakeHost) EnsureHostTags(context.Context, []string) error        { return nil }
 func (f *fakeHost) Serve(_ context.Context, name, endpoint, local string) error {
 	f.served = append(f.served, name+" "+endpoint+" "+local)
 	return nil
 }
+
 func (f *fakeHost) Advertise(_ context.Context, svc string) error {
 	f.advertised = append(f.advertised, svc)
 	return nil
 }
+
 func (f *fakeHost) Drain(_ context.Context, svc string) error {
 	f.drained = append(f.drained, svc)
 	return nil

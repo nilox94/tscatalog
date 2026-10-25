@@ -139,9 +139,18 @@ func Stop(ctx context.Context, s catalog.Service, w io.Writer) error {
 				fmt.Fprintf(w, "%s stop[%d] %s\n", s.Name, i, strings.Join(spec.Stop, " "))
 				continue
 			}
-			if err := stopPID(s.Name, i, spec.ID(i)); err != nil && first == nil {
-				first = err
-			} else if err == nil {
+			if err := stopPID(s.Name, i, spec.ID(i)); err != nil {
+				if isNoPidfile(err) {
+					open, perr := portOpen(ctx, s)
+					if perr == nil && !open {
+						fmt.Fprintf(w, "%s stop[%d] already stopped\n", s.Name, i)
+						continue
+					}
+				}
+				if first == nil {
+					first = err
+				}
+			} else {
 				fmt.Fprintf(w, "%s stop[%d] killed detached pid\n", s.Name, i)
 			}
 		case catalog.KindExternal:

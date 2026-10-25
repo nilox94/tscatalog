@@ -17,6 +17,8 @@ import (
 	"tscatalog/internal/catalog"
 )
 
+const pidfileWait = 30 * time.Second
+
 type pidRecord struct {
 	Path    string
 	PID     int
@@ -29,6 +31,20 @@ type noPidfileError struct {
 
 func (e noPidfileError) Error() string {
 	return fmt.Sprintf("%s: no pidfile (not started by tscatalog?)", e.name)
+}
+
+func isNoPidfile(err error) bool {
+	var e noPidfileError
+	return errors.As(err, &e)
+}
+
+// reaperExecutable is the binary that implements lifecycle.Reap (__reap).
+// Override with TSCATALOG_REAPER when the caller is not tscatalog or cat9s.
+func reaperExecutable() (string, error) {
+	if p := strings.TrimSpace(os.Getenv("TSCATALOG_REAPER")); p != "" {
+		return p, nil
+	}
+	return os.Executable()
 }
 
 func startDetached(name string, index int, spec catalog.LaunchSpec) error {
@@ -49,7 +65,7 @@ func startDetached(name string, index int, spec catalog.LaunchSpec) error {
 	if err != nil {
 		return err
 	}
-	exe, err := os.Executable()
+	exe, err := reaperExecutable()
 	if err != nil {
 		return err
 	}
@@ -68,7 +84,7 @@ func startDetached(name string, index int, spec catalog.LaunchSpec) error {
 	}
 	go func() { _ = cmd.Wait() }()
 
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(pidfileWait)
 	for {
 		if _, err := os.Stat(pidfile); err == nil {
 			return nil

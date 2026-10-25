@@ -12,11 +12,12 @@ import (
 	"tscatalog/internal/composeclient"
 	"tscatalog/internal/host"
 	"tscatalog/internal/lifecycle"
+	"tscatalog/internal/syncer"
 	"tscatalog/internal/tsapi"
 )
 
 // live probes the machine and runs catalog start, stop, and restart.
-// It does not write VIP Services, Serve, or the ACL.
+// Restart republishes published services (VIP, Serve, advertise).
 type live struct {
 	cat *catalog.File
 }
@@ -149,13 +150,16 @@ func (l live) Stop(ctx context.Context, name string) (string, error) {
 }
 
 func (l live) Restart(ctx context.Context, name string) (string, error) {
-	var buf bytes.Buffer
-	err := lifecycle.Restart(ctx, l.cat, name, &buf)
-	return strings.TrimSpace(buf.String()), err
+	return l.restartMany(ctx, []string{name})
 }
 
 func (l live) RestartAll(ctx context.Context, names []string) (string, error) {
+	return l.restartMany(ctx, names)
+}
+
+func (l live) restartMany(ctx context.Context, names []string) (string, error) {
 	var buf bytes.Buffer
+	var restarted []string
 	var first error
 	for _, name := range names {
 		if err := lifecycle.Restart(ctx, l.cat, name, &buf); err != nil {
@@ -163,10 +167,31 @@ func (l live) RestartAll(ctx context.Context, names []string) (string, error) {
 			if first == nil {
 				first = err
 			}
+			continue
+		}
+		restarted = append(restarted, name)
+	}
+	if len(restarted) == 0 {
+		if first != nil {
+			return strings.TrimSpace(buf.String()), first
+		}
+		return "", nil
+	}
+	publish := syncer.PublishedNames(l.cat, restarted)
+	if len(publish) > 0 {
+		if err := syncer.RepublishNames(ctx, l.cat, publish, &buf); err != nil {
+			fmt.Fprintf(&buf, "%s\n", err)
+			if first == nil {
+				first = err
+			}
 		}
 	}
+	out := strings.TrimSpace(buf.String())
 	if first != nil {
-		return strings.TrimSpace(buf.String()), first
+		return out, first
 	}
-	return fmt.Sprintf("restarted %d", len(names)), nil
+	if len(names) == 1 {
+		return out, nil
+	}
+	return fmt.Sprintf("restarted %d", len(restarted)), nil
 }
