@@ -14,18 +14,18 @@ import (
 )
 
 var (
-	good      = lipgloss.NewStyle().Foreground(lipgloss.Green)
-	warn      = lipgloss.NewStyle().Foreground(lipgloss.Yellow)
-	bad       = lipgloss.NewStyle().Foreground(lipgloss.Red)
-	key       = lipgloss.NewStyle().Foreground(lipgloss.Blue)
-	faint     = lipgloss.NewStyle().Faint(true)
-	bold      = lipgloss.NewStyle().Bold(true)
+	good       = lipgloss.NewStyle().Foreground(lipgloss.Green)
+	warn       = lipgloss.NewStyle().Foreground(lipgloss.Yellow)
+	bad        = lipgloss.NewStyle().Foreground(lipgloss.Red)
+	key        = lipgloss.NewStyle().Foreground(lipgloss.Blue)
+	faint      = lipgloss.NewStyle().Faint(true)
+	bold       = lipgloss.NewStyle().Bold(true)
 	selectMark = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Blue)
-	boldGood  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Green)
-	boldWarn  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Yellow)
-	boldBad   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Red)
-	boldWhite = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.White)
-	command   = lipgloss.NewStyle().Background(lipgloss.Color("#000000")).Foreground(lipgloss.White)
+	boldGood   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Green)
+	boldWarn   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Yellow)
+	boldBad    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Red)
+	boldWhite  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.White)
+	command    = lipgloss.NewStyle().Background(lipgloss.Color("#000000")).Foreground(lipgloss.White)
 )
 
 // Writer downgrades or strips ANSI from the environment and the destination.
@@ -99,6 +99,8 @@ func Action(action string) string {
 		return warn.Render(cell)
 	case "unchanged":
 		return faint.Render(cell)
+	case "delete":
+		return bad.Render(cell)
 	default:
 		return cell
 	}

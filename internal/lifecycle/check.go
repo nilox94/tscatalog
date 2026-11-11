@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/catalog"
 )
 
 // Report is one service's local bind, local HTTP, and public HTTPS.
@@ -66,8 +66,16 @@ func Probe(ctx context.Context, s catalog.Service, publicBase, hostSummary strin
 		}
 	}
 
-	if publicBase == "" {
+	if !s.Published() {
 		r.Public = "skip"
+		return r
+	}
+	if strings.Contains(hostSummary, "not-approved") {
+		r.OK = false
+	}
+	if publicBase == "" || approvalMissing(hostSummary) {
+		r.Public = "unknown"
+		r.OK = false
 		return r
 	}
 	code, err := getStatus(ctx, catalog.JoinURL(publicBase, s.Check.LocalPath()), 8*time.Second)
@@ -79,6 +87,15 @@ func Probe(ctx context.Context, s catalog.Service, publicBase, hostSummary strin
 		r.OK = false
 	}
 	return r
+}
+
+// approvalMissing is an approval lookup that did not return a host list.
+func approvalMissing(hostSummary string) bool {
+	switch hostSummary {
+	case "", "-":
+		return true
+	}
+	return strings.Contains(hostSummary, "unavailable")
 }
 
 func LocalReady(ctx context.Context, s catalog.Service) bool {

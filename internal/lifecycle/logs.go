@@ -12,8 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"tscatalog/internal/catalog"
-	"tscatalog/internal/composeclient"
+	"github.com/nilox94/tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/composeclient"
 )
 
 // ReadTail returns the last n lines of path.

@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/catalog"
 )
 
 func TestCatalogOwnsLivePID(t *testing.T) {

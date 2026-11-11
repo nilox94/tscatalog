@@ -28,20 +28,26 @@ func ListHosts(ctx context.Context, name string) ([]ServiceHost, error) {
 	if err != nil {
 		return nil, err
 	}
-	if c.APIKey == "" {
-		return nil, fmt.Errorf("ListHosts requires TAILSCALE_API_KEY")
+	// Services() runs client init, which installs API-key or OAuth auth on c.HTTP.
+	_ = c.Services()
+	if c.BaseURL == nil {
+		return nil, fmt.Errorf("tailscale client has no base URL")
 	}
 	tailnet := c.Tailnet
 	if tailnet == "" {
 		tailnet = "-"
 	}
-	u := fmt.Sprintf("https://api.tailscale.com/api/v2/tailnet/%s/vip-services/%s/devices", tailnet, name)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	u := c.BaseURL.JoinPath("api", "v2", "tailnet", tailnet, "vip-services", name, "devices")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.APIKey)
-	req.Header.Set("User-Agent", "tscatalog")
+	if c.APIKey != "" {
+		req.SetBasicAuth(c.APIKey, "")
+	}
+	if c.UserAgent != "" {
+		req.Header.Set("User-Agent", c.UserAgent)
+	}
 	// DefaultClient's dial timeout is 30s, and this lookup is on the probe path.
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

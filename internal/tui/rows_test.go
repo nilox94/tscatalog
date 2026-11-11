@@ -3,8 +3,8 @@ package tui
 import (
 	"testing"
 
-	"tscatalog/internal/catalog"
-	"tscatalog/internal/lifecycle"
+	"github.com/nilox94/tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/lifecycle"
 )
 
 func TestOrderPutsPublishedFailuresFirst(t *testing.T) {

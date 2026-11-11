@@ -10,9 +10,10 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"tscatalog/internal/catalog"
-	"tscatalog/internal/composeclient"
 	"unicode/utf8"
+
+	"github.com/nilox94/tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/composeclient"
 )
 
 // LaunchState is the state column of one ps row.

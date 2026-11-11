@@ -16,25 +16,29 @@ import (
 
 	"tailscale.com/client/tailscale/v2"
 
-	"tscatalog/internal/catalog"
-	"tscatalog/internal/composeclient"
-	"tscatalog/internal/host"
-	"tscatalog/internal/lifecycle"
-	"tscatalog/internal/policy"
-	"tscatalog/internal/style"
-	"tscatalog/internal/syncer"
-	"tscatalog/internal/tsapi"
+	"github.com/nilox94/tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/composeclient"
+	"github.com/nilox94/tscatalog/internal/host"
+	"github.com/nilox94/tscatalog/internal/lifecycle"
+	"github.com/nilox94/tscatalog/internal/policy"
+	"github.com/nilox94/tscatalog/internal/style"
+	"github.com/nilox94/tscatalog/internal/syncer"
+	"github.com/nilox94/tscatalog/internal/tsapi"
 )
+
+// version is set with -ldflags -X main.version=...
+var version = "dev"
 
 const rootLong = `Named Tailscale Services as code.
 
 Catalog file (when -f is omitted): TSCATALOG_CATALOG, then
 $XDG_CONFIG_HOME/tscatalog/catalog.yaml, then ./catalog.yaml.
 
-Auth (control plane), loaded from .env next to the catalog if unset:
-  TAILSCALE_API_KEY                  access token with Services write
-  TAILSCALE_OAUTH_CLIENT_ID/SECRET   alternative to an API key
-  TAILSCALE_TAILNET                  default "-" (the credential's tailnet)
+Auth (control plane), loaded from .env next to the catalog if unset.
+Only TS_* keys in that file are loaded:
+  TS_API_KEY                  access token
+  TS_OAUTH_CLIENT_ID/SECRET   alternative to an API key (scope: all)
+  TS_TAILNET                  default "-" (the credential's tailnet)
 
 The tailnet name is not stored in the catalog. Public URLs are
 https://<service>.<tailnet>.ts.net — always port 443.`
@@ -47,7 +51,7 @@ func main() {
 		}
 		return
 	}
-	if err := fang.Execute(context.Background(), newRootCmd()); err != nil {
+	if err := fang.Execute(context.Background(), newRootCmd(), fang.WithVersion(version)); err != nil {
 		os.Exit(1)
 	}
 }
@@ -111,7 +115,7 @@ func newRootCmd() *cobra.Command {
 		},
 	})
 
-	var dry, tailnetOnly, hostOnly, policyOnly, noPolicy bool
+	var dry, tailnetOnly, hostOnly, policyOnly, noPolicy, prune, resetNode bool
 	apply := &cobra.Command{
 		Use:   "apply [name ...]",
 		Short: "Reconcile VIP Services, Serve, advertisements, and the ACL",
@@ -123,6 +127,13 @@ so auto-approval can attach.
 No names means every catalog service. When the selected rows and the
 ACL are already in sync, apply prints "tailnet unchanged" and does not
 advertise.
+
+--prune deletes VIP Services and Serve mappings whose svc: name is not
+in this catalog, and rewrites the catalog 443 grant. tagOwners stay a
+union. Without --prune, removing a row does not delete tailnet state.
+
+--reset-node retries tailscale up with --reset when the node tag cannot
+be requested otherwise. That drops settings the command did not repeat.
 
 Arguments may be a catalog name, a vip label, or svc:<label>.`,
 		ValidArgsFunction: completeNames,
@@ -138,6 +149,8 @@ Arguments may be a catalog name, a vip label, or svc:<label>.`,
 				Advertise: !tailnetOnly && !policyOnly,
 				Policy:    (!noPolicy && !hostOnly && !tailnetOnly) || policyOnly,
 				Names:     ids,
+				Prune:     prune,
+				ResetNode: resetNode,
 			}
 			return runApply(cmd.Context(), cat, opts)
 		},
@@ -148,6 +161,8 @@ Arguments may be a catalog name, a vip label, or svc:<label>.`,
 	af.BoolVar(&hostOnly, "host-only", false, "only update local Serve mappings")
 	af.BoolVar(&policyOnly, "policy-only", false, "only merge the tailnet ACL")
 	af.BoolVar(&noPolicy, "no-policy", false, "skip ACL merge")
+	af.BoolVar(&prune, "prune", false, "delete VIP Services and Serve mappings absent from this catalog")
+	af.BoolVar(&resetNode, "reset-node", false, "allow tailscale up --reset when requesting node tags")
 	apply.MarkFlagsMutuallyExclusive("policy-only", "host-only")
 	apply.MarkFlagsMutuallyExclusive("policy-only", "tailnet-only")
 	apply.MarkFlagsMutuallyExclusive("policy-only", "no-policy")
@@ -170,12 +185,15 @@ The ACL merge is always the whole catalog. After an ACL write, every
 service is drained, re-served, and advertised.
 
 No names means every catalog service. --local skips apply.
+--prune and --reset-node are passed through to apply.
 "Already listening" means the local port is open; up does not restart
 a process that still holds that port.`,
 		func(ctx context.Context, c *catalog.File, names []string) error {
-			return runUp(ctx, c, names, !localOnly)
+			return runUp(ctx, c, names, !localOnly, prune, resetNode)
 		})
 	up.Flags().BoolVar(&localOnly, "local", false, "start and probe only; skip VIP, Serve, advertise, and ACL")
+	up.Flags().BoolVar(&prune, "prune", false, "delete VIP Services and Serve mappings absent from this catalog")
+	up.Flags().BoolVar(&resetNode, "reset-node", false, "allow tailscale up --reset when requesting node tags")
 	restart := named("restart", "Stop then start selected services, then republish on the tailnet",
 		`When the local port is already open, restart stops the catalog-owned
 process first (stop argv, detached pid, or compose down), then starts again.
@@ -184,7 +202,9 @@ for those names only. Unpublished services are local-only.`,
 		runRestart)
 	root.AddCommand(
 		up,
-		named("stop", "Run catalog stop argv, or SIGTERM a process tscatalog detached", "", runStop),
+		named("stop", "Run catalog stop argv, or signal a process tscatalog detached",
+			`A detached process is signaled as a group: SIGTERM, then SIGKILL after 10s.
+A child that calls setsid leaves the group and is not signaled.`, runStop),
 		restart,
 		named("health", "Probe TCP + HTTP locally, HTTPS on the public URL, and host approval", "", runHealth),
 		named("describe", "Print catalog services with VIP, Serve, approval, and public URL",
@@ -262,7 +282,7 @@ func runAutostart(ctx context.Context, cat *catalog.File) error {
 		fmt.Fprintln(os.Stderr, "no services with autostart: true")
 		return nil
 	}
-	return runUp(ctx, cat, names, false)
+	return runUp(ctx, cat, names, false, false, false)
 }
 
 func runAutostartInstall(catalogFile string) error {
@@ -621,6 +641,26 @@ func runStop(ctx context.Context, cat *catalog.File, names []string) error {
 	return first
 }
 
+func runUp(ctx context.Context, cat *catalog.File, names []string, publish, prune, resetNode bool) error {
+	if err := runRuntime(ctx, cat, names); err != nil {
+		return err
+	}
+	if publish {
+		ids, err := catalogIDs(cat, names)
+		if err != nil {
+			return err
+		}
+		opts := syncer.Options{
+			Tailnet: true, Host: true, Advertise: true, Policy: true, Names: ids,
+			Prune: prune, ResetNode: resetNode,
+		}
+		if err := runApply(ctx, cat, opts); err != nil {
+			return err
+		}
+	}
+	return runHealth(ctx, cat, names)
+}
+
 func runRestart(ctx context.Context, cat *catalog.File, names []string) error {
 	if len(names) == 0 {
 		names = shortNames(cat)
@@ -647,7 +687,7 @@ func runRestart(ctx context.Context, cat *catalog.File, names []string) error {
 	}
 	if len(ids) > 0 {
 		if err := runApply(ctx, cat, syncer.Options{
-			Tailnet: true, Host: true, Advertise: true, Policy: true, Names: ids,
+			Tailnet: true, Host: true, Advertise: true, Names: ids,
 		}); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			if first == nil {
@@ -745,21 +785,4 @@ func runLogs(cmd *cobra.Command, cat *catalog.File, args []string, tail int, fol
 		return err
 	}
 	return lifecycle.Logs(ctx, s, which, tail, follow, cmd.Flags().Changed("tail"), os.Stdout, comp)
-}
-
-func runUp(ctx context.Context, cat *catalog.File, names []string, publish bool) error {
-	if err := runRuntime(ctx, cat, names); err != nil {
-		return err
-	}
-	if publish {
-		ids, err := catalogIDs(cat, names)
-		if err != nil {
-			return err
-		}
-		opts := syncer.Options{Tailnet: true, Host: true, Advertise: true, Policy: true, Names: ids}
-		if err := runApply(ctx, cat, opts); err != nil {
-			return err
-		}
-	}
-	return runHealth(ctx, cat, names)
 }

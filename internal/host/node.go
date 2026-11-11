@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/catalog"
 )
 
 type nodeSelf struct {
@@ -31,7 +31,7 @@ func (c CLI) SelfTags(ctx context.Context) ([]string, error) {
 
 // EnsureHostTags makes this machine a tagged node so it can host VIP Services.
 // It requests access.autoApproveHost via tailscale up when tags are missing.
-func (c CLI) EnsureHostTags(ctx context.Context, want []string) error {
+func (c CLI) EnsureHostTags(ctx context.Context, want []string, resetNode bool) error {
 	if len(want) == 0 {
 		return nil
 	}
@@ -42,7 +42,7 @@ func (c CLI) EnsureHostTags(ctx context.Context, want []string) error {
 	if catalog.HasAll(have, want) {
 		return nil
 	}
-	if err := c.requestAdvertiseTags(ctx, want); err != nil {
+	if err := c.requestAdvertiseTags(ctx, want, resetNode); err != nil {
 		return err
 	}
 	have, err = c.SelfTags(ctx)
@@ -69,7 +69,7 @@ type debugPrefs struct {
 	RunSSH                 bool     `json:"RunSSH"`
 }
 
-func (c CLI) requestAdvertiseTags(ctx context.Context, want []string) error {
+func (c CLI) requestAdvertiseTags(ctx context.Context, want []string, resetNode bool) error {
 	prefs, err := c.debugPrefs(ctx)
 	if err != nil {
 		return err
@@ -78,18 +78,19 @@ func (c CLI) requestAdvertiseTags(ctx context.Context, want []string) error {
 	tagArg := strings.Join(tags, ",")
 	args := upArgsFromPrefs(prefs, tagArg)
 	err = c.runUp(ctx, args)
-	if err != nil && strings.Contains(err.Error(), "requires mentioning all") {
-		err = c.runUp(ctx, append([]string{"--reset"}, args...))
-	}
 	if err != nil {
-		msg := err.Error()
-		if cmd := extractSuggestedUp(msg); cmd != "" {
+		if cmd := extractSuggestedUp(err.Error()); cmd != "" {
 			fields := strings.Fields(cmd)
 			if len(fields) > 1 {
 				args = fields[1:] // drop "tailscale"
 				err = c.runUp(ctx, args)
 			}
 		}
+	}
+	// --reset drops every pref this command did not repeat. Only the
+	// --reset-node flag asks for that. The suggested command above is the retry.
+	if err != nil && resetNode && strings.Contains(err.Error(), "requires mentioning all") {
+		err = c.runUp(ctx, append([]string{"--reset"}, args...))
 	}
 	if err != nil && strings.Contains(err.Error(), "exit-node-allow-lan-access") {
 		args = dropFlag(args, "--exit-node-allow-lan-access")

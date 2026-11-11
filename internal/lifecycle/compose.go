@@ -2,8 +2,9 @@ package lifecycle
 
 import (
 	"context"
-	"tscatalog/internal/catalog"
-	"tscatalog/internal/composeclient"
+
+	"github.com/nilox94/tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/composeclient"
 
 	"github.com/compose-spec/compose-go/v2/types"
 )

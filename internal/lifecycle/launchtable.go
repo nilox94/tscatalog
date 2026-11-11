@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"tscatalog/internal/style"
+	"github.com/nilox94/tscatalog/internal/style"
 )
 
 const (

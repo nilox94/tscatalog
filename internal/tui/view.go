@@ -6,8 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"tscatalog/internal/lifecycle"
-	"tscatalog/internal/style"
+	"github.com/nilox94/tscatalog/internal/lifecycle"
+	"github.com/nilox94/tscatalog/internal/style"
 )
 
 func (m model) View() tea.View {

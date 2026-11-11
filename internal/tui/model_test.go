@@ -8,8 +8,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/acarl005/stripansi"
 
-	"tscatalog/internal/catalog"
-	"tscatalog/internal/lifecycle"
+	"github.com/nilox94/tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/lifecycle"
 )
 
 func viewPlain(m model) string {

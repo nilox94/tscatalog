@@ -2,7 +2,7 @@
 
 package lifecycle
 
-import "tscatalog/internal/catalog"
+import "github.com/nilox94/tscatalog/internal/catalog"
 
 func processStatus(s catalog.Service, index int, spec catalog.LaunchSpec) LaunchStatus {
 	return LaunchStatus{

@@ -8,7 +8,7 @@ import (
 
 	"tailscale.com/client/tailscale/v2"
 
-	"tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/catalog"
 )
 
 func sampleCatalog() *catalog.File {
@@ -90,8 +90,9 @@ func TestComputePlanUnchangedNormalizesPort(t *testing.T) {
 }
 
 type fakeAPI struct {
-	have []tailscale.Service
-	puts []tailscale.Service
+	have    []tailscale.Service
+	puts    []tailscale.Service
+	deleted []string
 }
 
 func (f *fakeAPI) List(context.Context) ([]tailscale.Service, error) { return f.have, nil }
@@ -100,27 +101,42 @@ func (f *fakeAPI) CreateOrUpdate(_ context.Context, svc tailscale.Service) error
 	return nil
 }
 
+func (f *fakeAPI) Delete(_ context.Context, name string) error {
+	f.deleted = append(f.deleted, name)
+	return nil
+}
+
 type fakeHost struct {
 	cfg        *catalog.ServeFile
 	served     []string
 	advertised []string
 	drained    []string
+	cleared    []string
 }
 
 type fakePolicy struct {
 	acl *tailscale.ACL
+	raw string
 	set int
 }
 
 func (f *fakePolicy) Get(context.Context) (*tailscale.ACL, error) { return f.acl, nil }
-func (f *fakePolicy) Set(context.Context, tailscale.ACL, string) error {
+func (f *fakePolicy) Raw(context.Context) (string, string, error) {
+	if f.raw != "" {
+		return f.raw, "etag", nil
+	}
+	return "{}\n", "etag", nil
+}
+
+func (f *fakePolicy) SetRaw(_ context.Context, body, _ string) error {
 	f.set++
+	f.raw = body
 	return nil
 }
-func (f *fakePolicy) Validate(context.Context, tailscale.ACL) error { return nil }
+func (f *fakePolicy) ValidateRaw(context.Context, string) error { return nil }
 
 func (f *fakeHost) GetConfig(context.Context) (*catalog.ServeFile, error) { return f.cfg, nil }
-func (f *fakeHost) EnsureHostTags(context.Context, []string) error        { return nil }
+func (f *fakeHost) EnsureHostTags(context.Context, []string, bool) error  { return nil }
 func (f *fakeHost) Serve(_ context.Context, name, endpoint, local string) error {
 	f.served = append(f.served, name+" "+endpoint+" "+local)
 	return nil
@@ -133,6 +149,11 @@ func (f *fakeHost) Advertise(_ context.Context, svc string) error {
 
 func (f *fakeHost) Drain(_ context.Context, svc string) error {
 	f.drained = append(f.drained, svc)
+	return nil
+}
+
+func (f *fakeHost) Clear(_ context.Context, name, endpoint string) error {
+	f.cleared = append(f.cleared, name+" "+endpoint)
 	return nil
 }
 
@@ -263,6 +284,32 @@ func TestApplyPolicyChangeAdvertisesEveryService(t *testing.T) {
 	}
 	if strings.Join(h.served, "|") != "svc:web tcp:443 http://127.0.0.1:8080|svc:api tcp:443 http://127.0.0.1:8081" {
 		t.Fatalf("served %v", h.served)
+	}
+}
+
+func TestApplyPruneDeletesAbsent(t *testing.T) {
+	want := sampleCatalog()
+	api := &fakeAPI{have: []tailscale.Service{
+		{Name: "svc:web", Ports: []string{"tcp:443"}},
+		{Name: "svc:api", Ports: []string{"tcp:443"}},
+		{Name: "svc:gone", Ports: []string{"tcp:443"}},
+	}}
+	h := &fakeHost{cfg: &catalog.ServeFile{Services: map[string]catalog.ServeService{
+		"svc:web":  {Endpoints: map[string]string{"tcp:443": "http://127.0.0.1:8080"}},
+		"svc:api":  {Endpoints: map[string]string{"tcp:443": "http://127.0.0.1:8081"}},
+		"svc:gone": {Endpoints: map[string]string{"tcp:443": "http://127.0.0.1:9"}},
+	}}}
+	err := Apply(context.Background(), want, api, h, nil, Options{
+		Tailnet: true, Host: true, Advertise: true, Prune: true,
+	}, ioDiscard())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(api.deleted) != 1 || api.deleted[0] != "svc:gone" {
+		t.Fatalf("deleted %v", api.deleted)
+	}
+	if len(h.cleared) != 1 || h.cleared[0] != "svc:gone tcp:443" {
+		t.Fatalf("cleared %v", h.cleared)
 	}
 }
 

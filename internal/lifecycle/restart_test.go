@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/catalog"
 )
 
 func TestDecide(t *testing.T) {

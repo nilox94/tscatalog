@@ -7,7 +7,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"tscatalog/internal/catalog"
+
+	"github.com/nilox94/tscatalog/internal/catalog"
 )
 
 func processStatus(s catalog.Service, index int, spec catalog.LaunchSpec) LaunchStatus {

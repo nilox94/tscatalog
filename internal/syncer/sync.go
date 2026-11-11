@@ -8,20 +8,22 @@ import (
 
 	"tailscale.com/client/tailscale/v2"
 
-	"tscatalog/internal/catalog"
-	"tscatalog/internal/policy"
-	"tscatalog/internal/style"
+	"github.com/nilox94/tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/policy"
+	"github.com/nilox94/tscatalog/internal/style"
 )
 
 type API interface {
 	List(ctx context.Context) ([]tailscale.Service, error)
 	CreateOrUpdate(ctx context.Context, svc tailscale.Service) error
+	Delete(ctx context.Context, name string) error
 }
 
 type PolicyAPI interface {
 	Get(ctx context.Context) (*tailscale.ACL, error)
-	Set(ctx context.Context, acl tailscale.ACL, etag string) error
-	Validate(ctx context.Context, acl tailscale.ACL) error
+	Raw(ctx context.Context) (body, etag string, err error)
+	SetRaw(ctx context.Context, body, etag string) error
+	ValidateRaw(ctx context.Context, body string) error
 }
 
 type ClientPolicy struct {
@@ -32,20 +34,29 @@ func (c ClientPolicy) Get(ctx context.Context) (*tailscale.ACL, error) {
 	return c.Policy.Get(ctx)
 }
 
-func (c ClientPolicy) Set(ctx context.Context, acl tailscale.ACL, etag string) error {
-	return c.Policy.Set(ctx, acl, etag)
+func (c ClientPolicy) Raw(ctx context.Context) (string, string, error) {
+	raw, err := c.Policy.Raw(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	return raw.HuJSON, raw.ETag, nil
 }
 
-func (c ClientPolicy) Validate(ctx context.Context, acl tailscale.ACL) error {
-	return c.Policy.Validate(ctx, acl)
+func (c ClientPolicy) SetRaw(ctx context.Context, body, etag string) error {
+	return c.Policy.Set(ctx, body, etag)
+}
+
+func (c ClientPolicy) ValidateRaw(ctx context.Context, body string) error {
+	return c.Policy.Validate(ctx, body)
 }
 
 type Host interface {
 	GetConfig(ctx context.Context) (*catalog.ServeFile, error)
-	EnsureHostTags(ctx context.Context, tags []string) error
+	EnsureHostTags(ctx context.Context, tags []string, resetNode bool) error
 	Serve(ctx context.Context, name, endpoint, local string) error
 	Advertise(ctx context.Context, svc string) error
 	Drain(ctx context.Context, svc string) error
+	Clear(ctx context.Context, name, endpoint string) error
 }
 
 type ClientAPI struct {
@@ -58,6 +69,10 @@ func (c ClientAPI) List(ctx context.Context) ([]tailscale.Service, error) {
 
 func (c ClientAPI) CreateOrUpdate(ctx context.Context, svc tailscale.Service) error {
 	return c.Services.CreateOrUpdate(ctx, svc)
+}
+
+func (c ClientAPI) Delete(ctx context.Context, name string) error {
+	return c.Services.Delete(ctx, name)
 }
 
 type Plan struct {
@@ -192,6 +207,11 @@ type Options struct {
 	// ACL merge stays catalog-wide. After a policy write, every service
 	// is drained, re-served, and advertised.
 	Names []string
+	// Prune deletes VIP Services and Serve mappings whose svc: name is
+	// not in this catalog, and rewrites the catalog-owned 443 grant.
+	Prune bool
+	// ResetNode allows tailscale up --reset when tagging the node.
+	ResetNode bool
 }
 
 func Apply(ctx context.Context, want *catalog.File, api API, host Host, pol PolicyAPI, opts Options, w io.Writer) error {
@@ -226,6 +246,10 @@ func Apply(ctx context.Context, want *catalog.File, api API, host Host, pol Poli
 	}
 
 	plan := ComputePlan(want, have, serve)
+	if opts.Prune {
+		plan.Tailnet = append(plan.Tailnet, pruneTailnet(want, have)...)
+		plan.Host = append(plan.Host, pruneHost(want, serve)...)
+	}
 	var haveACL *tailscale.ACL
 	if opts.Policy {
 		if pol == nil {
@@ -237,6 +261,13 @@ func Apply(ctx context.Context, want *catalog.File, api API, host Host, pol Poli
 			return fmt.Errorf("get ACL: %w", err)
 		}
 		plan.Policy = policy.ComputePlan(policy.FromCatalog(want), haveACL).Changes
+		if opts.Prune && grantNeedsPrune(haveACL, policy.FromCatalog(want).GrantDst) {
+			plan.Policy = append(plan.Policy, policy.Change{
+				Name:   "grants",
+				Action: "update",
+				Detail: "prune dst to catalog",
+			})
+		}
 	}
 	shown := filterPlan(want, plan, opts.Names)
 	if !opts.Tailnet {
@@ -259,22 +290,40 @@ func Apply(ctx context.Context, want *catalog.File, api API, host Host, pol Poli
 		if pol == nil {
 			return fmt.Errorf("policy API client required")
 		}
-		if !policy.ComputePlan(policy.FromCatalog(want), haveACL).NeedsApply() {
+		rawBody, etag, err := pol.Raw(ctx)
+		if err != nil {
+			return fmt.Errorf("get ACL: %w", err)
+		}
+		edited, err := policy.Edit(rawBody, policy.FromCatalog(want), opts.Prune)
+		if err != nil {
+			return fmt.Errorf("edit ACL: %w", err)
+		}
+		if edited == rawBody {
 			fmt.Fprintln(w, style.Faint("policy unchanged"))
 		} else {
-			merged := policy.Merge(haveACL, policy.FromCatalog(want))
-			if err := pol.Validate(ctx, *merged); err != nil {
+			if err := pol.ValidateRaw(ctx, edited); err != nil {
 				return fmt.Errorf("validate ACL: %w", err)
 			}
-			etag := ""
-			if haveACL != nil {
-				etag = haveACL.ETag
-			}
-			if err := pol.Set(ctx, *merged, etag); err != nil {
+			if err := pol.SetRaw(ctx, edited, etag); err != nil {
 				return fmt.Errorf("set ACL: %w", err)
 			}
 			policyChanged = true
 			fmt.Fprintln(w, style.Warn("policy merged (tagOwners, autoApprovers; grants only if no catch-all)"))
+		}
+	}
+
+	if opts.Prune && opts.Tailnet {
+		if api == nil {
+			return fmt.Errorf("control-plane API client required")
+		}
+		for _, svc := range have {
+			if _, ok := publishedSet(want)[svc.Name]; ok {
+				continue
+			}
+			if err := api.Delete(ctx, svc.Name); err != nil {
+				return fmt.Errorf("delete %s: %w", svc.Name, err)
+			}
+			fmt.Fprintf(w, "delete %s\n", svc.Name)
 		}
 	}
 
@@ -307,8 +356,20 @@ func Apply(ctx context.Context, want *catalog.File, api API, host Host, pol Poli
 			return fmt.Errorf("local tailscale CLI required")
 		}
 		if tags := want.HostTags(); len(tags) > 0 {
-			if err := host.EnsureHostTags(ctx, tags); err != nil {
+			if err := host.EnsureHostTags(ctx, tags, opts.ResetNode); err != nil {
 				return fmt.Errorf("host identity: %w", err)
+			}
+		}
+		if opts.Prune && serve != nil {
+			keep := publishedSet(want)
+			for name := range serve.Services {
+				if _, ok := keep[name]; ok {
+					continue
+				}
+				if err := host.Clear(ctx, name, want.Endpoint); err != nil {
+					return fmt.Errorf("clear %s: %w", name, err)
+				}
+				fmt.Fprintf(w, "clear %s\n", name)
 			}
 		}
 		for i, s := range want.Services {
@@ -410,7 +471,95 @@ func scopeNeedsApply(want *catalog.File, plan Plan, opts Options) bool {
 			}
 		}
 	}
+	if opts.Prune {
+		for _, c := range plan.Tailnet {
+			if c.Action == "delete" {
+				return true
+			}
+		}
+		for _, c := range plan.Host {
+			if c.Action == "delete" {
+				return true
+			}
+		}
+	}
 	return false
+}
+
+func grantNeedsPrune(acl *tailscale.ACL, dst []string) bool {
+	if acl == nil {
+		return false
+	}
+	for _, g := range acl.Grants {
+		if len(g.Destination) == 0 || len(g.IP) == 0 {
+			continue
+		}
+		owned := true
+		for _, d := range g.Destination {
+			if !strings.HasPrefix(d, "svc:") {
+				owned = false
+				break
+			}
+		}
+		if !owned {
+			continue
+		}
+		for _, p := range g.IP {
+			if p != "443" && p != "tcp:443" {
+				owned = false
+				break
+			}
+		}
+		if !owned {
+			continue
+		}
+		if len(g.Destination) != len(dst) {
+			return true
+		}
+		for i := range dst {
+			if g.Destination[i] != dst[i] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func publishedSet(want *catalog.File) map[string]struct{} {
+	keep := map[string]struct{}{}
+	for _, s := range want.Services {
+		if s.Published() {
+			keep[s.SVCName()] = struct{}{}
+		}
+	}
+	return keep
+}
+
+func pruneTailnet(want *catalog.File, have []tailscale.Service) []Change {
+	keep := publishedSet(want)
+	var out []Change
+	for _, svc := range have {
+		if _, ok := keep[svc.Name]; ok {
+			continue
+		}
+		out = append(out, Change{Name: svc.Name, Action: "delete", Detail: "not in catalog"})
+	}
+	return out
+}
+
+func pruneHost(want *catalog.File, serve *catalog.ServeFile) []Change {
+	if serve == nil {
+		return nil
+	}
+	keep := publishedSet(want)
+	var out []Change
+	for name := range serve.Services {
+		if _, ok := keep[name]; ok {
+			continue
+		}
+		out = append(out, Change{Name: name, Action: "delete", Detail: "not in catalog"})
+	}
+	return out
 }
 
 func filterPlan(want *catalog.File, plan Plan, names []string) Plan {
@@ -429,6 +578,16 @@ func filterPlan(want *catalog.File, plan Plan, names []string) Plan {
 		}
 		if i < len(plan.Host) {
 			out.Host = append(out.Host, plan.Host[i])
+		}
+	}
+	for _, c := range plan.Tailnet {
+		if c.Action == "delete" {
+			out.Tailnet = append(out.Tailnet, c)
+		}
+	}
+	for _, c := range plan.Host {
+		if c.Action == "delete" {
+			out.Host = append(out.Host, c)
 		}
 	}
 	return out

@@ -14,7 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/catalog"
 )
 
 const pidfileWait = 30 * time.Second
@@ -23,19 +23,6 @@ type pidRecord struct {
 	Path    string
 	PID     int
 	StartID string
-}
-
-type noPidfileError struct {
-	name string
-}
-
-func (e noPidfileError) Error() string {
-	return fmt.Sprintf("%s: no pidfile (not started by tscatalog?)", e.name)
-}
-
-func isNoPidfile(err error) bool {
-	var e noPidfileError
-	return errors.As(err, &e)
 }
 
 // reaperExecutable is the binary that implements lifecycle.Reap (__reap).
@@ -77,7 +64,7 @@ func startDetached(name string, index int, spec catalog.LaunchSpec) error {
 	_ = os.Remove(exitfile)
 	_ = os.Remove(intent)
 	cmd.Dir = expandHome(spec.Cwd)
-	cmd.Env = os.Environ()
+	cmd.Env = childEnviron()
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return err
@@ -99,39 +86,59 @@ func startDetached(name string, index int, spec catalog.LaunchSpec) error {
 	}
 }
 
+const stopGrace = 10 * time.Second
+
 func stopPID(name string, index int, id string) error {
 	rec, err := readPidfile(name, index)
 	if err != nil {
 		return err
 	}
-	if rec.StartID != "" && !sameProcess(rec.PID, rec.StartID) {
+	if rec.PID <= 0 {
+		return fmt.Errorf("%s: bad pid %d", name, rec.PID)
+	}
+	if rec.StartID == "" || !sameProcess(rec.PID, rec.StartID) {
 		return fmt.Errorf("%s: pid %d is not the process we started", name, rec.PID)
 	}
-	if rec.StartID != "" {
-		intent, err := stopIntentPath(name, id)
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(intent, []byte("1\n"), 0o600); err != nil {
-			return err
-		}
-		if err := syscall.Kill(rec.PID, syscall.SIGTERM); err != nil {
-			_ = os.Remove(intent)
-			return fmt.Errorf("%s: signal %d: %w", name, rec.PID, err)
-		}
-		return nil
-	}
-	if err := syscall.Kill(rec.PID, syscall.SIGTERM); err != nil {
-		return fmt.Errorf("%s: signal %d: %w", name, rec.PID, err)
-	}
-	exitfile, err := exitPath(name, id)
+	intent, err := stopIntentPath(name, id)
 	if err != nil {
 		return err
 	}
-	if err := writeExit(exitfile, ExitRecord{State: "stopped", At: time.Now()}); err != nil {
+	if err := os.WriteFile(intent, []byte("1\n"), 0o600); err != nil {
 		return err
 	}
-	return os.Remove(rec.Path)
+	if err := killProcessGroup(rec.PID, syscall.SIGTERM); err != nil {
+		_ = os.Remove(intent)
+		return fmt.Errorf("%s: signal %d: %w", name, rec.PID, err)
+	}
+	if processGone(rec, stopGrace) {
+		return nil
+	}
+	_ = killProcessGroup(rec.PID, syscall.SIGKILL)
+	if processGone(rec, time.Second) {
+		return nil
+	}
+	return fmt.Errorf("%s: pid %d still alive after SIGKILL", name, rec.PID)
+}
+
+func killProcessGroup(pid int, sig syscall.Signal) error {
+	err := syscall.Kill(-pid, sig)
+	if errors.Is(err, syscall.ESRCH) {
+		return nil
+	}
+	return err
+}
+
+func processGone(rec pidRecord, d time.Duration) bool {
+	deadline := time.Now().Add(d)
+	for {
+		if !sameProcess(rec.PID, rec.StartID) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 func readPidfile(name string, index int) (pidRecord, error) {
@@ -166,6 +173,9 @@ func parsePidfile(name, path string, raw []byte) (pidRecord, error) {
 	pid, err := strconv.Atoi(strings.TrimSpace(lines[0]))
 	if err != nil {
 		return pidRecord{}, fmt.Errorf("%s: bad pidfile: %w", name, err)
+	}
+	if pid <= 0 {
+		return pidRecord{}, fmt.Errorf("%s: bad pidfile: pid %d", name, pid)
 	}
 	rec := pidRecord{Path: path, PID: pid}
 	if len(lines) >= 2 {
@@ -224,13 +234,20 @@ func Reap(args []string) error {
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Stdout = f
 	cmd.Stderr = f
+	cmd.Env = childEnviron()
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		_ = writeExit(exitfile, ExitRecord{State: "exited", Code: 127, At: time.Now()})
 		return err
 	}
 	startID, err := processStartID(cmd.Process.Pid)
-	if err != nil {
-		startID = ""
+	if err != nil || startID == "" {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+		if err == nil {
+			err = fmt.Errorf("empty start id")
+		}
+		return fmt.Errorf("reap: start id: %w", err)
 	}
 	body := fmt.Sprintf("%d\n%s\n", cmd.Process.Pid, startID)
 	if err := os.WriteFile(pidfile, []byte(body), 0o600); err != nil {

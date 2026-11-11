@@ -8,12 +8,12 @@ import (
 	"sync"
 	"time"
 
-	"tscatalog/internal/catalog"
-	"tscatalog/internal/composeclient"
-	"tscatalog/internal/host"
-	"tscatalog/internal/lifecycle"
-	"tscatalog/internal/syncer"
-	"tscatalog/internal/tsapi"
+	"github.com/nilox94/tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/composeclient"
+	"github.com/nilox94/tscatalog/internal/host"
+	"github.com/nilox94/tscatalog/internal/lifecycle"
+	"github.com/nilox94/tscatalog/internal/syncer"
+	"github.com/nilox94/tscatalog/internal/tsapi"
 )
 
 // live probes the machine and runs catalog start, stop, and restart.

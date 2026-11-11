@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/catalog"
 )
 
 // Action is what a restart should do to the local process.

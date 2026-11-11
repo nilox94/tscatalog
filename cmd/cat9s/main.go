@@ -10,11 +10,14 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
-	"tscatalog/internal/catalog"
-	"tscatalog/internal/lifecycle"
-	"tscatalog/internal/tsapi"
-	"tscatalog/internal/tui"
+	"github.com/nilox94/tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/lifecycle"
+	"github.com/nilox94/tscatalog/internal/tsapi"
+	"github.com/nilox94/tscatalog/internal/tui"
 )
+
+// version is set with -ldflags -X main.version=...
+var version = "dev"
 
 const longHelp = `Browse the catalog and restart local processes.
 
@@ -24,9 +27,9 @@ whose process needs it. / filters by name.
 
 Restart starts a dead process. If the port is open, it stops and
 starts the process only when this catalog launched it. requires
-start first and are not published. A command that fails opens the
-error along the bottom; esc closes it. cat9s does not write VIP
-Services, Serve, or the ACL.
+start first and are not published. A published restart republishes
+VIP, Serve, and advertise. cat9s does not write the ACL.
+A command that fails opens the error along the bottom; esc closes it.
 
 Catalog file (when -f is omitted): TSCATALOG_CATALOG, then
 $XDG_CONFIG_HOME/tscatalog/catalog.yaml, then ./catalog.yaml.`
@@ -39,7 +42,7 @@ func main() {
 		}
 		return
 	}
-	if err := fang.Execute(context.Background(), newCmd()); err != nil {
+	if err := fang.Execute(context.Background(), newCmd(), fang.WithVersion(version)); err != nil {
 		os.Exit(1)
 	}
 }

@@ -4,9 +4,9 @@ import (
 	"context"
 	"io"
 
-	"tscatalog/internal/catalog"
-	"tscatalog/internal/host"
-	"tscatalog/internal/tsapi"
+	"github.com/nilox94/tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/host"
+	"github.com/nilox94/tscatalog/internal/tsapi"
 )
 
 // ApplyConfigured wires API and host clients, then reconciles the catalog.
@@ -32,7 +32,8 @@ func ApplyConfigured(ctx context.Context, cat *catalog.File, opts Options, w io.
 	return Apply(ctx, cat, api, h, pol, opts, w)
 }
 
-// RepublishNames runs VIP, Serve, advertise, and ACL for catalog names.
+// RepublishNames runs VIP, Serve, and advertise for catalog names.
+// It does not write the ACL.
 func RepublishNames(ctx context.Context, cat *catalog.File, names []string, w io.Writer) error {
 	if len(names) == 0 {
 		return nil
@@ -41,7 +42,6 @@ func RepublishNames(ctx context.Context, cat *catalog.File, names []string, w io
 		Tailnet:   true,
 		Host:      true,
 		Advertise: true,
-		Policy:    true,
 		Names:     names,
 	}
 	return ApplyConfigured(ctx, cat, opts, w)

@@ -5,7 +5,7 @@ import (
 
 	"tailscale.com/client/tailscale/v2"
 
-	"tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/catalog"
 )
 
 func sampleCatalog() *catalog.File {

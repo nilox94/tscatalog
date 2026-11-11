@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/catalog"
 )
 
 // CLI talks to the local tailscaled via the tailscale CLI.
@@ -48,10 +48,7 @@ func jsonPayload(out []byte) []byte {
 func (c CLI) GetConfig(ctx context.Context) (*catalog.ServeFile, error) {
 	out, err := c.run(ctx, "serve", "get-config", "--all")
 	if err != nil {
-		return &catalog.ServeFile{
-			Version:  catalog.ServeVersion,
-			Services: map[string]catalog.ServeService{},
-		}, nil
+		return nil, err
 	}
 	var cfg catalog.ServeFile
 	if err := json.Unmarshal(jsonPayload(out), &cfg); err != nil {
@@ -74,7 +71,8 @@ func (c CLI) Serve(ctx context.Context, name, endpoint, local string) error {
 	if !ok || port == "" {
 		return fmt.Errorf("endpoint %q: want tcp:<port>", endpoint)
 	}
-	_, err := c.run(ctx, "serve",
+	_, err := c.run(
+		ctx, "serve",
 		"--service="+name,
 		"--https="+port,
 		"--bg",
@@ -91,6 +89,16 @@ func (c CLI) Advertise(ctx context.Context, svc string) error {
 
 func (c CLI) Drain(ctx context.Context, svc string) error {
 	_, err := c.run(ctx, "serve", "drain", svc)
+	return err
+}
+
+// Clear removes one Serve mapping. port is the public tcp port, without the tcp: prefix.
+func (c CLI) Clear(ctx context.Context, name, endpoint string) error {
+	port, ok := strings.CutPrefix(endpoint, "tcp:")
+	if !ok || port == "" {
+		return fmt.Errorf("endpoint %q: want tcp:<port>", endpoint)
+	}
+	_, err := c.run(ctx, "serve", "--service="+name, "--https="+port, "off")
 	return err
 }
 

@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	"tscatalog/internal/style"
+	"github.com/nilox94/tscatalog/internal/style"
 )
 
 const (

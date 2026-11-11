@@ -9,7 +9,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
-	"tscatalog/internal/catalog"
+
+	"github.com/nilox94/tscatalog/internal/catalog"
 )
 
 func TestReaperRecordsExit(t *testing.T) {
@@ -114,6 +115,27 @@ func waitGone(t *testing.T, path string) {
 			t.Fatalf("still present: %s (%v)", path, err)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestStopRejectsBadPidfile(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	s := catalog.Service{Name: "badpid", Launch: catalog.Launch{{Start: []string{"sleep", "30"}, Detach: true}}}
+	path, err := pidPath(s.Name, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("0\nabc\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := stopPID(s.Name, 0, s.Launch[0].ID(0)); err == nil {
+		t.Fatal("pid 0 should not be signaled")
+	}
+	if err := os.WriteFile(path, []byte("123\n\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := stopPID(s.Name, 0, s.Launch[0].ID(0)); err == nil {
+		t.Fatal("missing start id should not be signaled")
 	}
 }
 

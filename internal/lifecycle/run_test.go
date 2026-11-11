@@ -4,17 +4,17 @@ package lifecycle
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
-	"tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/catalog"
 )
 
 func TestStartReportsExitReason(t *testing.T) {
@@ -80,17 +80,30 @@ func TestStopPIDLegacyPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(script)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = syscall.Kill(cmd.Process.Pid, syscall.SIGKILL) }()
-	if err := os.WriteFile(legPath, []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o600); err != nil {
+	defer func() { _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }()
+	waited := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(waited)
+	}()
+	startID, err := processStartID(cmd.Process.Pid)
+	if err != nil || startID == "" {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf("%d\n%s\n", cmd.Process.Pid, startID)
+	if err := os.WriteFile(legPath, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := stopPID("legacy", 0, "0"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(legPath); !os.IsNotExist(err) {
-		t.Fatalf("legacy pidfile should be removed: %v", err)
+	select {
+	case <-waited:
+	case <-time.After(2 * time.Second):
+		t.Fatal("legacy pid was not signaled")
 	}
 }

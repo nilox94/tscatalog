@@ -38,6 +38,9 @@ func LoadDotEnv(path string) error {
 		if key == "" {
 			return fmt.Errorf("%s:%d: empty key", path, lineNo)
 		}
+		if !strings.HasPrefix(key, "TS_") {
+			continue
+		}
 		val = unquote(strings.TrimSpace(val))
 		if os.Getenv(key) == "" {
 			if err := os.Setenv(key, val); err != nil {
@@ -49,9 +52,13 @@ func LoadDotEnv(path string) error {
 }
 
 func unquote(v string) string {
-	if len(v) >= 2 {
-		if (v[0] == '"' && v[len(v)-1] == '"') || (v[0] == '\'' && v[len(v)-1] == '\'') {
-			v = v[1 : len(v)-1]
+	if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') {
+		q := v[0]
+		if end := strings.LastIndexByte(v, q); end > 0 {
+			rest := strings.TrimSpace(v[end+1:])
+			if rest == "" || strings.HasPrefix(rest, "#") {
+				return v[1:end]
+			}
 		}
 	}
 	if i := strings.Index(v, " #"); i >= 0 {

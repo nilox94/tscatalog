@@ -3,8 +3,8 @@ package tui
 import (
 	"strings"
 
-	"tscatalog/internal/catalog"
-	"tscatalog/internal/lifecycle"
+	"github.com/nilox94/tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/lifecycle"
 )
 
 // Row is one catalog service plus the latest probe.

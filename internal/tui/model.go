@@ -10,8 +10,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"tscatalog/internal/catalog"
-	"tscatalog/internal/lifecycle"
+	"github.com/nilox94/tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/lifecycle"
 )
 
 // Loader fetches probes. Prepare runs once per pass; Probe runs per service

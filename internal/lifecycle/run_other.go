@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"runtime"
 
-	"tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/catalog"
 )
 
 func startDetached(name string, index int, spec catalog.LaunchSpec) error {

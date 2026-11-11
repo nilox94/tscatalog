@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"testing"
 
-	"tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/catalog"
 )
 
 func TestFormatHTTP(t *testing.T) {
@@ -42,13 +42,26 @@ func TestProbeLocalHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := catalog.Service{
-		Name:  "web",
-		Local: "http://" + u.Host,
-		Check: catalog.Check{Path: "/health", Expect: []int{200}, Public: []int{200}},
+		Name:        "web",
+		Local:       "http://" + u.Host,
+		Unpublished: true,
+		Check:       catalog.Check{Path: "/health", Expect: []int{200}, Public: []int{200}},
 	}
 	r := Probe(context.Background(), s, "", "")
-	if !r.OK || r.Local != "200" {
+	if !r.OK || r.Local != "200" || r.Public != "skip" {
 		t.Fatalf("%+v", r)
+	}
+}
+
+func TestProbePublishedUnknown(t *testing.T) {
+	s := catalog.Service{Name: "web", Local: "http://127.0.0.1:9"}
+	r := Probe(context.Background(), s, "", "(approval unavailable)")
+	if r.OK || r.Public != "unknown" {
+		t.Fatalf("%+v", r)
+	}
+	r = Probe(context.Background(), s, "", "not-approved / draining")
+	if r.OK || r.Public != "unknown" {
+		t.Fatalf("not-approved should fail before the public check: %+v", r)
 	}
 }
 

@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,11 +11,24 @@ import (
 	"strings"
 	"time"
 
-	"tscatalog/internal/catalog"
-	"tscatalog/internal/style"
+	"github.com/nilox94/tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/style"
 )
 
 const defaultWait = 45 * time.Second
+
+type noPidfileError struct {
+	name string
+}
+
+func (e noPidfileError) Error() string {
+	return fmt.Sprintf("%s: no pidfile (not started by tscatalog?)", e.name)
+}
+
+func isNoPidfile(err error) bool {
+	var e noPidfileError
+	return errors.As(err, &e)
+}
 
 func expandHome(p string) string {
 	if p == "" {
@@ -42,7 +56,7 @@ func command(spec catalog.LaunchSpec) *exec.Cmd {
 	if spec.Cwd != "" {
 		cmd.Dir = expandHome(spec.Cwd)
 	}
-	cmd.Env = os.Environ()
+	cmd.Env = childEnviron()
 	return cmd
 }
 
@@ -51,8 +65,23 @@ func commandStop(spec catalog.LaunchSpec) *exec.Cmd {
 	if spec.Cwd != "" {
 		cmd.Dir = expandHome(spec.Cwd)
 	}
-	cmd.Env = os.Environ()
+	cmd.Env = childEnviron()
 	return cmd
+}
+
+// childEnviron is the process environment without Tailscale credentials.
+// Those keys are for this program. Launched services do not inherit them.
+func childEnviron() []string {
+	env := os.Environ()
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		k, _, _ := strings.Cut(kv, "=")
+		if strings.HasPrefix(k, "TS_") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }
 
 // Start runs each launch spec, then waits until the catalog local bind is ready.

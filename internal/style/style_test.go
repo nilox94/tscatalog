@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/colorprofile"
 )
@@ -62,8 +63,8 @@ func TestWriterStripsBuffer(t *testing.T) {
 func TestTruncateRunesCommandWidth(t *testing.T) {
 	s := strings.Repeat("a", 50)
 	got := truncateRunes(s, 40)
-	if len(got) != 40 || !strings.HasSuffix(got, "…") {
-		t.Fatalf("got %q len=%d", got, len(got))
+	if utf8.RuneCountInString(got) != 40 || !strings.HasSuffix(got, "…") {
+		t.Fatalf("got %q runes=%d", got, utf8.RuneCountInString(got))
 	}
 	if truncateRunes("short", 40) != "short" {
 		t.Fatal("short string unchanged")

@@ -7,18 +7,19 @@ import (
 
 	"tailscale.com/client/tailscale/v2"
 
-	"tscatalog/internal/catalog"
+	"github.com/nilox94/tscatalog/internal/catalog"
 )
 
 const defaultTagOwner = "autogroup:admin"
 
 // Desired is the catalog-driven slice of the tailnet policy.
 type Desired struct {
-	HostTag   string   // e.g. tag:server; empty skips host/tag mutations
-	TagOwners []string // owners of HostTag; default autogroup:admin
-	GrantSrc  []string
-	GrantDst  []string // svc:name entries
-	GrantIP   []string // always 443
+	HostTag      string   // e.g. tag:server; empty skips host/tag mutations
+	TagOwners    []string // owners of HostTag; default autogroup:admin
+	GrantSrc     []string
+	GrantDst     []string // svc:name entries
+	GrantIP      []string // always 443
+	SrcDefaulted bool     // GrantSrc was filled because access.src was empty
 }
 
 func FromCatalog(f *catalog.File) Desired {
@@ -30,6 +31,7 @@ func FromCatalog(f *catalog.File) Desired {
 	}
 	if len(d.GrantSrc) == 0 {
 		d.GrantSrc = []string{"autogroup:member"}
+		d.SrcDefaulted = true
 	}
 	if d.HostTag != "" && len(d.TagOwners) == 0 {
 		d.TagOwners = []string{defaultTagOwner}
@@ -140,7 +142,7 @@ func ComputePlan(want Desired, have *tailscale.ACL) Plan {
 		p.Changes = append(p.Changes, Change{
 			Name:   "grants",
 			Action: "create",
-			Detail: fmt.Sprintf("%s → %s ip=%s", strings.Join(want.GrantSrc, ","), strings.Join(want.GrantDst, ","), strings.Join(want.GrantIP, ",")),
+			Detail: fmt.Sprintf("%s → %s ip=%s", srcDetail(want), strings.Join(want.GrantDst, ","), strings.Join(want.GrantIP, ",")),
 		})
 	}
 	return p
@@ -170,6 +172,14 @@ func Merge(have *tailscale.ACL, want Desired) *tailscale.ACL {
 		})
 	}
 	return out
+}
+
+func srcDetail(want Desired) string {
+	s := strings.Join(want.GrantSrc, ",")
+	if want.SrcDefaulted {
+		return "access.src default " + s
+	}
+	return s
 }
 
 func cloneACL(in *tailscale.ACL) *tailscale.ACL {
