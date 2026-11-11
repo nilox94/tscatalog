@@ -16,8 +16,6 @@ A `v*` tag publishes `tscatalog-$GOOS-$GOARCH` and `cat9s-$GOOS-$GOARCH` for lin
 
 ![tscatalog list, describe, ps, and health](docs/demo/tscatalog.gif)
 
-![cat9s](docs/demo/cat9s.gif)
-
 ## Auth
 
 An API access token or an OAuth client, in the environment or in a gitignored `.env` next to the catalog. See [`.env.example`](.env.example). Process environment wins. Only `TS_*` keys are loaded. Launched processes do not inherit that file.
@@ -31,6 +29,8 @@ An API access token or an OAuth client, in the environment or in a gitignored `.
 ## Catalog file
 
 `-f` if set. Otherwise `TSCATALOG_CATALOG`, and that path is used even when the file is missing. Otherwise `$XDG_CONFIG_HOME/tscatalog/catalog.yaml`, or `~/.config/tscatalog/catalog.yaml` when `XDG_CONFIG_HOME` is unset, if that file exists. Otherwise `./catalog.yaml` if that file exists.
+
+**A service is a command or a Compose stack.** One file can include both. A command is an argv (`start`, `stop`), not a shell string. A Compose stack is `kind: compose` plus the project directory.
 
 ```yaml
 endpoint: tcp:443
@@ -46,6 +46,14 @@ services:
       stop: [my-web, stop]
     check:
       path: /health
+
+  - name: edge
+    local: http://127.0.0.1:8083
+    launch:
+      kind: compose
+      cwd: ~/src/edge
+      files: [compose.yaml]
+      services: [proxy]
 ```
 
 The public URL is `https://<label>.<tailnet>.ts.net` on port 443. The label is `vip`, or the service name with dots replaced by hyphens. The tailnet name is not stored in the catalog. `local` stays on loopback and is only the Serve backend.
@@ -75,6 +83,8 @@ A command argument is a catalog name, a vip label, or `svc:` plus either of thos
 `apply` also has `--dry-run`, `--tailnet-only`, `--host-only`, `--policy-only`, `--no-policy`, `--prune`, and `--reset-node`. `up` passes `--prune` and `--reset-node` through.
 
 ## cat9s
+
+![cat9s](docs/demo/cat9s.gif)
 
 List: `j` / `k` move, `r` restart the selected row, `R` restart every visible row that needs it, `x` stop, `l` logs, `/` filter, Enter describe, `q` quit. Esc closes the error panel, or quits when there is no error and no filter.
 
