@@ -31,17 +31,20 @@ var version = "dev"
 
 const rootLong = `Named Tailscale Services as code.
 
-Catalog file (when -f is omitted): TSCATALOG_CATALOG, then
-$XDG_CONFIG_HOME/tscatalog/catalog.yaml, then ./catalog.yaml.
+Catalog file (when -f is omitted): TSCATALOG_CATALOG, even if that file is missing.
+Otherwise $XDG_CONFIG_HOME/tscatalog/catalog.yaml, or ~/.config/tscatalog/catalog.yaml
+when XDG_CONFIG_HOME is unset, if that file exists. Otherwise ./catalog.yaml if it exists.
 
 Auth (control plane), loaded from .env next to the catalog if unset.
-Only TS_* keys in that file are loaded:
-  TS_API_KEY                  access token
+Only TS_* keys in that file are loaded. Process environment wins.
+Launched processes do not inherit that file.
+  TS_API_KEY                  access token (tskey-api-…, not a device auth key)
   TS_OAUTH_CLIENT_ID/SECRET   alternative to an API key (scope: all)
   TS_TAILNET                  default "-" (the credential's tailnet)
 
 The tailnet name is not stored in the catalog. Public URLs are
-https://<service>.<tailnet>.ts.net — always port 443.`
+https://<label>.<tailnet>.ts.net — always port 443.
+The label is vip, or the service name with dots replaced by hyphens.`
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "__reap" {
@@ -206,7 +209,15 @@ for those names only. Unpublished services are local-only.`,
 			`A detached process is signaled as a group: SIGTERM, then SIGKILL after 10s.
 A child that calls setsid leaves the group and is not signaled.`, runStop),
 		restart,
-		named("health", "Probe TCP + HTTP locally, HTTPS on the public URL, and host approval", "", runHealth),
+		named("health", "Probe TCP + HTTP locally, HTTPS on the public URL, and host approval",
+			`TCP bind, then local HTTP when check.path or check.expect is set.
+No path and no expect: local is tcp when the port is open, down when it is not.
+A path with no expect accepts local 200 only.
+Public HTTPS uses check.public, or 200, 204, 301, 302, 303, 307, and 308.
+Unpublished rows skip that check (public skip, host local).
+timeout is a deadline. refused is connection refused. A number is the HTTP status.
+A published row with no public URL or no approval lookup is public unknown and fails.
+not-approved fails the probe. A name expands to its requires.`, runHealth),
 		named("describe", "Print catalog services with VIP, Serve, approval, and public URL",
 			"Arguments may be a catalog name, a vip label, or svc:<label>.", runDescribe),
 	)
@@ -227,8 +238,9 @@ A row with shape - is a start/stop helper, not a process or a container.`,
 	logsCmd := &cobra.Command{
 		Use:   "logs [service] [name]",
 		Short: "Show output for a service",
-		Long: `logs <service> follows every row of that service.
+		Long: `logs <service> prints every launch row of that service.
 logs <service> <name> uses the NAME column from ps.
+--follow keeps reading. -f is the catalog file, not follow.
 --tail -1 shows every line. A row with shape - runs its logs argv unchanged.`,
 		ValidArgsFunction: completeNames,
 		Args:              cobra.MaximumNArgs(2),
@@ -236,7 +248,7 @@ logs <service> <name> uses the NAME column from ps.
 			return runLogs(cmd, cat, args, tail, follow)
 		},
 	}
-	logsCmd.Flags().BoolVarP(&follow, "follow", "f", false, "keep reading until interrupted")
+	logsCmd.Flags().BoolVar(&follow, "follow", false, "keep reading until interrupted")
 	logsCmd.Flags().IntVar(&tail, "tail", 100, "lines to show (-1 is all)")
 	root.AddCommand(ps, logsCmd, newAutostartCmd(func() *catalog.File { return cat }, func() string { return catPath }))
 	return root
@@ -538,7 +550,7 @@ func printURLs(ctx context.Context, cat *catalog.File) {
 	w := style.Writer(os.Stdout)
 	suffix := magicSuffix(ctx)
 	if suffix == "" {
-		fmt.Fprintln(w, style.Faint("public: https://<name>.<tailnet>.ts.net"))
+		fmt.Fprintln(w, style.Faint("public: https://<label>.<tailnet>.ts.net"))
 		return
 	}
 	fmt.Fprintln(w, style.Bold("public URLs"))

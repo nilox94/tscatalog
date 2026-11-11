@@ -1,0 +1,22 @@
+# Offline fixture for docs/demo/*.tape. Nothing here is published.
+services:
+  - name: web
+    displayName: Demo
+    local: http://127.0.0.1:59991
+    unpublished: true
+    comment: loopback only
+    launch:
+      start: ["true"]
+      status: ["true"]
+      logs: ["echo", "web is idle"]
+    check:
+      path: /
+  - name: api
+    local: http://127.0.0.1:59992
+    unpublished: true
+    requires: [web]
+    launch:
+      name: api
+      start: ["true"]
+      status: ["false"]
+      logs: ["echo", "api is idle"]

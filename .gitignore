@@ -6,3 +6,4 @@
 .env.*
 !.env.example
 catalog.yaml
+/docs/demo/bin/

@@ -48,3 +48,25 @@ services:
       detach: true
     check:
       public: [200, 401]
+
+  # Not a Tailscale Service. up api starts it first; stop api leaves it running.
+  - name: worker
+    local: http://127.0.0.1:8082
+    unpublished: true
+    requires: [api]
+    launch:
+      start: [worker, start]
+      stop: [worker, stop]
+      status: [worker, status]
+      logs: [worker, logs]
+
+  # files are relative to cwd, not the directory tscatalog was started from.
+  - name: edge
+    displayName: Example Compose proxy
+    local: http://127.0.0.1:8083
+    launch:
+      kind: compose
+      name: edge
+      cwd: ~/src/edge
+      files: [compose.yaml]
+      services: [proxy]

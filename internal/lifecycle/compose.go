@@ -2,6 +2,8 @@ package lifecycle
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 
 	"github.com/nilox94/tscatalog/internal/catalog"
 	"github.com/nilox94/tscatalog/internal/composeclient"
@@ -51,11 +53,41 @@ func composeProject(ctx context.Context, spec catalog.LaunchSpec) (*types.Projec
 	if err != nil {
 		return nil, err
 	}
-	p, err := composeclient.Load(ctx, expandHome(spec.Cwd), files, projectName)
+	dir := expandHome(spec.Cwd)
+	files, err = absComposeFiles(dir, files)
+	if err != nil {
+		return nil, err
+	}
+	p, err := composeclient.Load(ctx, dir, files, projectName)
 	if err != nil {
 		return nil, err
 	}
 	return composeclient.Narrow(p, services)
+}
+
+// absComposeFiles resolves relative compose files against the launch cwd.
+// An empty dir is the process working directory. Absolute paths are unchanged.
+func absComposeFiles(dir string, files []string) ([]string, error) {
+	if len(files) == 0 {
+		return nil, nil
+	}
+	base := dir
+	if base == "" {
+		var err error
+		base, err = os.Getwd()
+		if err != nil {
+			return nil, err
+		}
+	}
+	out := make([]string, len(files))
+	for i, f := range files {
+		if filepath.IsAbs(f) {
+			out[i] = f
+			continue
+		}
+		out[i] = filepath.Join(base, f)
+	}
+	return out, nil
 }
 
 func composeClient(ctx context.Context) (*composeclient.Client, error) {

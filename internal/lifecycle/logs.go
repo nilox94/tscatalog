@@ -442,7 +442,7 @@ func runJob(ctx context.Context, s catalog.Service, job logJob, multi bool, tail
 }
 
 func runExternalCmd(ctx context.Context, job logJob, multi bool, w io.Writer, mu *sync.Mutex) error {
-	cmd := exec.Command(job.spec.Logs[0], job.spec.Logs[1:]...)
+	cmd := exec.CommandContext(ctx, job.spec.Logs[0], job.spec.Logs[1:]...)
 	if job.spec.Cwd != "" {
 		cmd.Dir = expandHome(job.spec.Cwd)
 	}
@@ -478,7 +478,7 @@ func runExternalCmd(ctx context.Context, job logJob, multi bool, w io.Writer, mu
 }
 
 func captureExternal(ctx context.Context, spec catalog.LaunchSpec) ([]string, error) {
-	cmd := exec.Command(spec.Logs[0], spec.Logs[1:]...)
+	cmd := exec.CommandContext(ctx, spec.Logs[0], spec.Logs[1:]...)
 	if spec.Cwd != "" {
 		cmd.Dir = expandHome(spec.Cwd)
 	}
@@ -550,7 +550,7 @@ func streamCompose(ctx context.Context, job logJob, comp *composeclient.Client, 
 }
 
 func streamExternal(ctx context.Context, job logJob, multi bool, out chan<- string) error {
-	cmd := exec.Command(job.spec.Logs[0], job.spec.Logs[1:]...)
+	cmd := exec.CommandContext(ctx, job.spec.Logs[0], job.spec.Logs[1:]...)
 	if job.spec.Cwd != "" {
 		cmd.Dir = expandHome(job.spec.Cwd)
 	}

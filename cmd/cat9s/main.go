@@ -22,17 +22,19 @@ var version = "dev"
 const longHelp = `Browse the catalog and restart local processes.
 
 Published services that are down or unhealthy are listed first.
-r restarts the selected service. R restarts every visible service
-whose process needs it. / filters by name.
+j and k move. r restarts the selected service. R restarts every visible
+service whose process needs it. x stops. l opens logs. / filters by name.
+Enter describes. q quits.
 
 Restart starts a dead process. If the port is open, it stops and
-starts the process only when this catalog launched it. requires
-start first and are not published. A published restart republishes
+starts the process only when this catalog launched it. requires start
+first and are not published. A published restart republishes
 VIP, Serve, and advertise. cat9s does not write the ACL.
 A command that fails opens the error along the bottom; esc closes it.
 
-Catalog file (when -f is omitted): TSCATALOG_CATALOG, then
-$XDG_CONFIG_HOME/tscatalog/catalog.yaml, then ./catalog.yaml.`
+Catalog file (when -f is omitted): TSCATALOG_CATALOG, even if that file is missing.
+Otherwise $XDG_CONFIG_HOME/tscatalog/catalog.yaml, or ~/.config/tscatalog/catalog.yaml
+when XDG_CONFIG_HOME is unset, if that file exists. Otherwise ./catalog.yaml if it exists.`
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "__reap" {

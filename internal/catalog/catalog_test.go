@@ -219,7 +219,7 @@ func TestExampleCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"web", "api"}
+	want := []string{"web", "api", "worker", "edge"}
 	if len(f.Services) != len(want) {
 		t.Fatalf("got %d services", len(f.Services))
 	}
@@ -227,5 +227,13 @@ func TestExampleCatalog(t *testing.T) {
 		if f.Services[i].Name != name {
 			t.Fatalf("services[%d]=%s want %s", i, f.Services[i].Name, name)
 		}
+	}
+	worker := f.Services[2]
+	if !worker.Unpublished || len(worker.Requires) != 1 || worker.Requires[0] != "api" {
+		t.Fatalf("worker unpublished=%v requires=%v", worker.Unpublished, worker.Requires)
+	}
+	edge := f.Services[3].Launch[0]
+	if edge.Kind != string(KindCompose) || len(edge.Files) != 1 || edge.Files[0] != "compose.yaml" {
+		t.Fatalf("edge launch kind=%s files=%v", edge.Kind, edge.Files)
 	}
 }

@@ -1,75 +1,85 @@
 # tscatalog
 
-Named Tailscale Services as code. Copy `catalog.example.yaml` and edit.
+Named Tailscale Services as code. One catalog file is the local processes and the Tailscale VIP Services, Serve mappings, and ACL grant.
 
-Catalog (`-f` unset): `TSCATALOG_CATALOG` → `$XDG_CONFIG_HOME/tscatalog/catalog.yaml` → `~/.config/tscatalog/catalog.yaml` → `./catalog.yaml`.
-Auth: gitignored `.env` next to the catalog (`.env.example`). Only `TS_*` keys are loaded: `TS_API_KEY`, or `TS_OAUTH_CLIENT_ID` and `TS_OAUTH_CLIENT_SECRET`, and optional `TS_TAILNET` (default `-`). Not stored in the catalog.
+## Install
 
-VIP Services API + `tailscale serve --service --https`. Public URL is always `https://<label>.<tailnet>.ts.net` **443**. `vip:` is one DNS label (default: dots in `name` → hyphens). Local bind stays loopback; it is not in the Service.
-
-IDs (any works as a command argument): **name** (catalog key) · **vip** (DNS label) · **svc:** (`svc:` + vip).
+Go 1.26.
 
 ```
 go install github.com/nilox94/tscatalog/cmd/...@latest
-
-go run ./cmd/tscatalog up                # start + apply + health
-go run ./cmd/tscatalog up web --local    # start + health
-go run ./cmd/tscatalog health
-go run ./cmd/tscatalog stop web
-go run ./cmd/tscatalog restart web
-go run ./cmd/tscatalog plan
-go run ./cmd/tscatalog apply --dry-run
-go run ./cmd/tscatalog apply web
-go run ./cmd/tscatalog list
-go run ./cmd/tscatalog describe web
-go run ./cmd/tscatalog autostart
-go install ./cmd/... && tscatalog autostart install
-go run ./cmd/cat9s
 ```
 
-From a checkout, `go install ./cmd/...` installs both binaries. `go install github.com/nilox94/tscatalog/cmd/...@latest` is the published form.
+That installs `tscatalog` and `cat9s`. From a checkout, `go install ./cmd/...` does the same.
+
+A `v*` tag publishes `tscatalog-$GOOS-$GOARCH` and `cat9s-$GOOS-$GOARCH` for linux and darwin, amd64 and arm64.
+
+![tscatalog list, describe, ps, and health](docs/demo/tscatalog.gif)
+
+![cat9s](docs/demo/cat9s.gif)
+
+## Auth
+
+An API access token or an OAuth client, in the environment or in a gitignored `.env` next to the catalog. See [`.env.example`](.env.example). Process environment wins. Only `TS_*` keys are loaded. Launched processes do not inherit that file.
+
+- `TS_API_KEY` — an [API access token](https://tailscale.com/docs/reference/key-secret-management) (`tskey-api-…`). Same token as [Tailscale API authentication](https://tailscale.com/docs/reference/tailscale-api#authentication). Not a device auth key.
+- `TS_OAUTH_CLIENT_ID` and `TS_OAUTH_CLIENT_SECRET` — an [OAuth client](https://tailscale.com/docs/features/oauth-clients) with scope `all`.
+- `TS_TAILNET` — optional. Default `-`, the credential's tailnet.
+
+`plan` and `apply` refuse to run without one of those credentials. `list`, `describe`, `health`, `ps`, `logs`, `stop`, `autostart`, and `up --local` run without one. `list` then prints `note: set TS_API_KEY (or OAuth client id/secret)`. `describe` prints `note: live overlay unavailable`. Both still print the MagicDNS name.
+
+## Catalog file
+
+`-f` if set. Otherwise `TSCATALOG_CATALOG`, and that path is used even when the file is missing. Otherwise `$XDG_CONFIG_HOME/tscatalog/catalog.yaml`, or `~/.config/tscatalog/catalog.yaml` when `XDG_CONFIG_HOME` is unset, if that file exists. Otherwise `./catalog.yaml` if that file exists.
+
+```yaml
+endpoint: tcp:443
+access:
+  src: [autogroup:member]
+  autoApproveHost: tag:server
+  tagOwners: [autogroup:admin]
+services:
+  - name: web
+    local: http://127.0.0.1:8080
+    launch:
+      start: [my-web, start]
+      stop: [my-web, stop]
+    check:
+      path: /health
+```
+
+The public URL is `https://<label>.<tailnet>.ts.net` on port 443. The label is `vip`, or the service name with dots replaced by hyphens. The tailnet name is not stored in the catalog. `local` stays on loopback and is only the Serve backend.
+
+Fields, Compose, and more snippets: [docs/catalog.md](docs/catalog.md). A longer copy is [`catalog.example.yaml`](catalog.example.yaml).
+
+A command argument is a catalog name, a vip label, or `svc:` plus either of those. `plan`, `list`, and `autostart` take no names. `logs` takes a service and an optional NAME from `ps`.
+
+## Commands
+
+| Command | API key | What |
+| --- | --- | --- |
+| `plan` | yes | [Diff](docs/tailnet.md#plan) VIP Services, local Serve, and the ACL. No processes or probes. |
+| `apply` | yes | [Reconcile](docs/tailnet.md#apply) VIP Services, Serve, advertisements, and the ACL. |
+| `up` | yes, unless `--local` | Start, then apply, then [health](docs/health.md). `--local` skips the tailnet. |
+| `restart` | yes, for a published name | Stop, start, then republish those names. No ACL write. |
+| `health` | no | [Probe](docs/health.md) bind, local HTTP, public HTTPS, and host approval. |
+| `list` | no | Names, API ports, Serve targets, and the public URL. |
+| `describe` | no | One service, plus its launch rows. |
+| `ps` | no | Processes and containers. |
+| `logs` | no | `logs <service>` or `logs <service> <name>`. `--follow` keeps reading. `-f` is the catalog file. |
+| `stop` | no | Stop argv, or `SIGTERM` then `SIGKILL` after 10s for a detached group. |
+| `autostart` | no | `up --local` for `autostart: true`, plus `requires`. `install` / `uninstall` on macOS. |
+| `completion` | no | Shell completion script. |
+| `cat9s` | no, until a published restart | Browse and restart. Needs a terminal. |
+
+`apply` also has `--dry-run`, `--tailnet-only`, `--host-only`, `--policy-only`, `--no-policy`, `--prune`, and `--reset-node`. `up` passes `--prune` and `--reset-node` through.
 
 ## cat9s
 
-Separate TUI. Needs a terminal. `r` / `R` restart republish published rows (VIP, Serve, advertise); no other ACL writes.
+List: `j` / `k` move, `r` restart the selected row, `R` restart every visible row that needs it, `x` stop, `l` logs, `/` filter, Enter describe, `q` quit. Esc closes the error panel, or quits when there is no error and no filter.
 
-- failures first (published, down or unhealthy); restart count
-- `/` filter · Enter describe · `x` stop that row · esc error banner
-- `r` / `R`: start if down; stop+start if owned (stop argv or live detached pid) and local check fails; skip foreign port, `not-approved`, `draining`
-- `requires` start first, not published
+Detail: Esc back, `q` quit.
 
-## launch
+Logs: `f` follow, `/` search, Tab next name, `j` / `k` scroll, Esc back.
 
-`up` / `stop` / `health` read optional `launch` and `check`. `start` is argv, not a shell. Several specs: start in order.
-
-| kind | how |
-| --- | --- |
-| `detach: true` (Unix) | long-running; pidfile + log under `$XDG_STATE_HOME/tscatalog` or `~/.local/state/tscatalog` (`run/`, `logs/`) |
-| no detach | helper that returns when ready; `stop` is its stop argv |
-| no `stop` | another manager owns the listener; `up` may still run `start`; cat9s will not restart a live port |
-
-`requires:` start locally first. `up app` publishes/probes only named rows. `stop app` does not stop shared deps.
-
-`unpublished: true` — launch + health only; no VIP, Serve, advertise, ACL.
-
-`autostart: true` — `tscatalog autostart` = `up --local` for those names (+ `requires`). macOS: `autostart install` writes `com.tscatalog.autostart` (`RunAtLoad`, no KeepAlive). Snapshots `PATH` and `TSCATALOG_CATALOG`. `go run` refused. `stop` stays down until `up` / restart / next login. `autostart uninstall` removes it.
-
-## health / up
-
-`health`: TCP bind · optional `check.path` / `expect` · public HTTPS (`check.public`, default 200/3xx) · host approval. 502 = Serve up, process down. Timeout ≈ host not approved. A published row with no public URL or no approval lookup is `unknown` and fails `health` and `up`. Unpublished rows skip the public check. `not-approved` fails the probe even when the public HTTP check does not run.
-
-`up`: launch → apply → health. Names limit launch, VIP, Serve, steady-state advertise, probes. ACL is always whole-catalog; a policy write drains and advertises every service. `--local` skips apply. `--prune` and `--reset-node` are passed through to apply. Already listening on `local` → no relaunch.
-
-## apply
-
-ACL merge: `tagOwners` for `autoApproveHost`, that tag on each VIP Service, `autoApprovers.services["<tag>"]` (`svc:*` is invalid). 443 grant only if no `*:*`. An empty `access.src` becomes `autogroup:member`, and `plan` shows that default on the grant line before a write. Leaves SSH, Funnel, routes, other tags, and comments outside the edited values. `--no-policy` / `--policy-only`.
-
-`tagOwners` is a union. Taking an owner out of the catalog does not remove them from the tailnet.
-
-Without `--prune`, deleting a catalog row does not delete its VIP Service, Serve mapping, or grant destination. `--prune` deletes VIP Services and Serve mappings whose `svc:` name is absent from this catalog, and rewrites the grant whose destinations are all `svc:` names on port 443.
-
-Apply requests `access.autoApproveHost` on this machine (`tailscale up --advertise-tags`) before Serve. If Tailscale refuses until every non-default flag is repeated, apply runs the `tailscale up` command Tailscale printed. `--reset-node` is the only path that retries with `--reset`, and that drops settings the command did not repeat. VIP hosts must be tagged nodes; `access.tagOwners` must allow whoever runs apply. If the tag stays pending, approve the device in the admin console.
-
-Policy is written as HuJSON with the etag. `restart` and cat9s republish VIP, Serve, and advertise, and do not write the ACL. After an ACL change: drain + re-advertise so auto-approval can attach. `not-approved` ads do not route TailVIPs.
-
-`stop` signals a detached process group (`SIGTERM`, then `SIGKILL` after 10s). A child that calls `setsid` leaves the group and is not signaled.
+Published rows that are down or unhealthy are listed first. Restart starts a dead process. If the port is open, it stops and starts only when this catalog launched it: the local check failed, or the local check passed and the overall probe failed. It skips a port something else holds, and it skips `not-approved` and `draining`. `requires` start first and are not published. A published restart republishes VIP, Serve, and advertise. cat9s does not write the ACL.
