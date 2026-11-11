@@ -29,22 +29,26 @@ import (
 // version is set with -ldflags -X main.version=...
 var version = "dev"
 
-const rootLong = `Named Tailscale Services as code.
+const rootLong = `One catalog file starts local processes and publishes each one at
+https://<label>.<tailnet>.ts.net on port 443.
 
 Catalog file (when -f is omitted): TSCATALOG_CATALOG, even if that file is missing.
 Otherwise $XDG_CONFIG_HOME/tscatalog/catalog.yaml, or ~/.config/tscatalog/catalog.yaml
 when XDG_CONFIG_HOME is unset, if that file exists. Otherwise ./catalog.yaml if it exists.
 
-Auth (control plane), loaded from .env next to the catalog if unset.
+The tailscale CLI must be on PATH and logged in.
+
+Auth for the control plane comes from the environment, or from .env next to the catalog.
 Only TS_* keys in that file are loaded. Process environment wins.
-Launched processes do not inherit that file.
+start, stop, and a detached process do not inherit that file. Every TS_* variable is removed from their environment.
+status and logs still see the process environment. Compose can interpolate TS_*.
+A container receives one only if its Compose file passes it through.
   TS_API_KEY                  access token (tskey-api-…, not a device auth key)
   TS_OAUTH_CLIENT_ID/SECRET   alternative to an API key (scope: all)
   TS_TAILNET                  default "-" (the credential's tailnet)
 
-The tailnet name is not stored in the catalog. Public URLs are
-https://<label>.<tailnet>.ts.net — always port 443.
-The label is vip, or the service name with dots replaced by hyphens.`
+The tailnet name is not stored in the catalog.
+The label is the vip field. When vip is empty, it is the service name with dots replaced by hyphens.`
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "__reap" {
@@ -66,7 +70,7 @@ func newRootCmd() *cobra.Command {
 
 	root := &cobra.Command{
 		Use:           "tscatalog",
-		Short:         "Named Tailscale Services as code",
+		Short:         "Start local processes and publish Tailscale HTTPS names",
 		Long:          rootLong,
 		SilenceUsage:  true,
 		SilenceErrors: true,

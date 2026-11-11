@@ -1,6 +1,8 @@
 # tscatalog
 
-Named Tailscale Services on one host: a catalog of what should exist on the tailnet, and how this machine starts the local listeners behind them.
+Word list for this repo. Install and first run are in the [README](README.md).
+
+One host. The catalog says which Tailscale HTTPS names should exist, and how this machine starts the local listeners behind them.
 
 ## Language
 
@@ -17,7 +19,7 @@ A long-running program tscatalog detaches and reaps.
 _Avoid_: daemon, LaunchAgent, service (the catalog row)
 
 **External**:
-A helper tscatalog runs and then forgets; some other manager owns the listener.
+A helper tscatalog runs and then forgets. Some other manager owns the listener.
 _Avoid_: unmanaged (it still has a catalog row)
 
 **Autostart**:

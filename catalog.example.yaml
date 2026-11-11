@@ -1,13 +1,13 @@
-# Copy to ~/.config/tscatalog/catalog.yaml (or ./catalog.yaml) and edit.
+# Copy to ~/.config/tscatalog/catalog.yaml or ./catalog.yaml and edit.
+# The commands and directories below are placeholders. Replace them before up.
 #
-# Public URL is always https://<tailscale-label>.<tailnet>.ts.net on 443.
-# Catalog name may contain dots; Tailscale VIP label defaults to hyphens (abc.xyz → abc-xyz) or set vip:.
-# The app's localhost port never appears in DNS — the Service
-# endpoint is tcp:443; local is only the Serve backend.
+# Public URL: https://<label>.<tailnet>.ts.net on port 443.
+# A dotted name becomes a hyphenated label (abc.xyz to abc-xyz) unless vip is set.
+# local stays on loopback. It is the Serve backend, not the public port.
 #
-#   tscatalog up              launch + apply + health
-#   tscatalog health
-#   tscatalog apply --dry-run
+#   tscatalog plan            writes nothing
+#   tscatalog up              start, then apply, then health
+#   tscatalog up --local      start and health only
 
 endpoint: tcp:443
 
@@ -21,7 +21,7 @@ access:
   autoApproveHost: tag:server
   # Who may apply that tag to a device. Include identities that run apply
   # (e.g. autogroup:member for self-hosted laptops, autogroup:admin for ops).
-  # apply merges this into the live ACL (fills empty tagOwners; keeps others).
+  # apply merges this into the live ACL. It fills empty tagOwners and keeps others.
   tagOwners: [autogroup:admin]
 
 services:
@@ -40,7 +40,7 @@ services:
   - name: api
     displayName: Example API
     local: http://127.0.0.1:8081
-    comment: Detach a long-running process (Unix); logs/pidfiles in XDG state dir
+    comment: Detach a long-running process on Unix. Logs and pid files are in the XDG state dir
     autostart: true
     launch:
       cwd: ~/src/api
@@ -49,7 +49,9 @@ services:
     check:
       public: [200, 401]
 
-  # Not a Tailscale Service. up api starts it first; stop api leaves it running.
+  # Unpublished. Not a Tailscale Service.
+  # up worker starts api, then worker. up api does not start worker.
+  # stop worker leaves api running. stop does not follow requires.
   - name: worker
     local: http://127.0.0.1:8082
     unpublished: true

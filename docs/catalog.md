@@ -54,6 +54,8 @@ services:
 
 `start`, `stop`, `status`, and `logs` are argv, not a shell. `kind` may be omitted: a strict `docker compose up` argv is compose, `detach: true` is a process, and anything else is an external helper.
 
+`start`, `stop`, and a detached process do not inherit `.env`. Every `TS_*` variable is removed from their environment. `status` and `logs` still see the process environment. Compose can interpolate `TS_*`. A container receives one only if its Compose file passes it through.
+
 ### Process
 
 `detach: true`, or `kind: process`. `start` is required. `services`, `files`, `status`, and `logs` are rejected.
@@ -66,6 +68,8 @@ launch:
 ```
 
 The pid file and log are under `$XDG_STATE_HOME/tscatalog` or `~/.local/state/tscatalog` (`run/`, `logs/`). `stop` signals the process group: `SIGTERM`, then `SIGKILL` after 10 seconds. A child that calls `setsid` leaves the group and is not signaled.
+
+`detach: true` is Unix only. On other systems start fails with `launch detach is only supported on unix`.
 
 ### External
 
@@ -115,8 +119,36 @@ SERVICE          NAME               SHAPE     STATE      PID      DETAIL
 
 A process row is a child this program detached. A container row is one Compose service. Shape `-` is a start/stop helper, not a process or a container. `logs <service> <name>` uses the NAME column.
 
+## logs
+
+`logs <service>` or `logs <service> <name>`. For a process or a container, the default is the last 100 lines. `--tail` sets the count. `--tail -1` shows every line. `--follow` keeps reading. `-f` is the catalog file, not follow.
+
+A row with shape `-` runs its `logs` argv unchanged. `--tail` does not change that argv.
+
 ## autostart
 
 `tscatalog autostart` is `up --local` for every `autostart: true` service, plus their `requires`. No VIP, Serve, advertise, or ACL writes.
 
-On macOS, `autostart install` writes one login LaunchAgent, `com.tscatalog.autostart` (`RunAtLoad`, no `KeepAlive`). It snapshots `PATH` and the catalog path. `go run` is refused. `stop` stays down until the next `up`, `restart`, or login. `autostart uninstall` removes the agent.
+On macOS, `autostart install` writes one login LaunchAgent, `com.tscatalog.autostart` (`RunAtLoad`, no `KeepAlive`). It snapshots `PATH` and the catalog path. `go run` is refused. `stop` stays down until the next `up`, `restart`, or login. `autostart uninstall` removes the agent. Why this is one agent, not one per service: [ADR 0001](adr/0001-login-agent-not-supervisor.md).
+
+On any other OS, `autostart install` exits 1 with `autostart install is only implemented on macOS`. `autostart uninstall` exits 1 with `autostart uninstall is only implemented on macOS`.
+
+On Linux, run `tscatalog autostart` from a user service. `systemd --user` does not use your shell `PATH`. Point `ExecStart` at the binary.
+
+```ini
+[Unit]
+Description=tscatalog local autostart
+
+[Service]
+Type=oneshot
+ExecStart=/path/to/tscatalog -f %h/.config/tscatalog/catalog.yaml autostart
+
+[Install]
+WantedBy=default.target
+```
+
+```
+systemctl --user enable --now tscatalog-autostart.service
+```
+
+The service exits after the processes start. It does not restart them. `stop` stays down until the next `up`, `restart`, or login.

@@ -49,7 +49,41 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: notes
+        working-directory: dist
+        run: |
+          sha256sum tscatalog-* cat9s-* > SHA256SUMS
+          cat > "$GITHUB_WORKSPACE/notes.md" <<'EOF'
+          Linux and macOS binaries for amd64 and arm64. Download `tscatalog-<os>-<arch>` and `cat9s-<os>-<arch>` from the assets below. `chmod +x` both and put them on `PATH`.
+
+          Check `SHA256SUMS`:
+
+          ```
+          sha256sum -c SHA256SUMS
+          ```
+
+          On macOS, `shasum -a 256 -c SHA256SUMS`.
+
+          The binaries are not notarized and have no Developer ID. If macOS blocks the download:
+
+          ```
+          xattr -d com.apple.quarantine tscatalog cat9s
+          ```
+
+          With Go 1.26:
+
+          ```
+          go install github.com/nilox94/tscatalog/cmd/...@__TAG__
+          ```
+
+          That installs `tscatalog` and `cat9s`.
+
+          How to run it: https://github.com/nilox94/tscatalog#readme
+
+          Commits: https://github.com/nilox94/tscatalog/commits/__TAG__
+          EOF
+          sed -i "s/__TAG__/${GITHUB_REF_NAME}/g" "$GITHUB_WORKSPACE/notes.md"
       - name: publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes-file notes.md
