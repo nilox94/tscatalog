@@ -19,6 +19,7 @@ This machine must carry `access.autoApproveHost`. The example uses `tag:server`.
 
 - Linux or macOS. Release binaries are amd64 and arm64.
 - `tailscale` on `PATH`, and `tailscale status` works.
+- HTTPS certificates enabled on the tailnet. `apply` runs `tailscale serve --https=<port> --bg --yes`, where `<port>` is the catalog endpoint (default 443). That command does not open Tailscale's browser prompt.
 - Go 1.26, or a binary from the release.
 - `TS_API_KEY` or an OAuth client before `plan`, `apply`, or `up`.
 
@@ -43,12 +44,15 @@ That installs `tscatalog` and `cat9s` into `$(go env GOPATH)/bin`. From a checko
 | Linux | `tscatalog-linux-amd64`, `cat9s-linux-amd64` | `tscatalog-linux-arm64`, `cat9s-linux-arm64` |
 | macOS | `tscatalog-darwin-amd64`, `cat9s-darwin-amd64` | `tscatalog-darwin-arm64`, `cat9s-darwin-arm64` |
 
-`chmod +x` both files and put them on `PATH`. Check `SHA256SUMS` on that release. Linux uses `sha256sum -c SHA256SUMS`. macOS uses `shasum -a 256 -c SHA256SUMS`.
+Check `SHA256SUMS` on that release before renaming. Linux uses `sha256sum -c SHA256SUMS`. macOS uses `shasum -a 256 -c SHA256SUMS`. The checksum file lists the asset names.
 
-The binaries are not notarized and have no Developer ID. macOS quarantines the download. If Gatekeeper blocks them:
+The binaries are not notarized and have no Developer ID. macOS quarantines the download. Clear the attribute on the downloaded names, then rename them and put them on `PATH`. This is the arm64 Mac pair. Other rows in the table use their own names. Linux skips `xattr`.
 
 ```
-xattr -d com.apple.quarantine tscatalog cat9s
+xattr -d com.apple.quarantine tscatalog-darwin-arm64 cat9s-darwin-arm64
+mv tscatalog-darwin-arm64 tscatalog
+mv cat9s-darwin-arm64 cat9s
+chmod +x tscatalog cat9s
 ```
 
 ## First run
@@ -58,7 +62,10 @@ From a clone of this repo:
 ```
 mkdir -p ~/.config/tscatalog
 cp catalog.example.yaml ~/.config/tscatalog/catalog.yaml
+cp .env.example ~/.config/tscatalog/.env
 ```
+
+Edit `~/.config/tscatalog/.env` before `plan`. The command reads `.env` from the directory of the catalog it resolved. Once `~/.config/tscatalog/catalog.yaml` exists, a `.env` in the clone is not that file.
 
 `./catalog.yaml` in the current directory is also found. Replace the placeholder commands before `up`. Those commands are not programs in this repo.
 
@@ -172,7 +179,7 @@ Fields, Compose, `requires`, and autostart: [docs/catalog.md](docs/catalog.md). 
 
 `cat9s` is not a `tscatalog` command. It is the other binary.
 
-The recording below is `list`, `describe`, `ps`, and `health` on [`docs/demo/fixture/demo.yaml`](docs/demo/fixture/demo.yaml). Every service in that file is `unpublished`, so the picture has no public URL. `plan` and `up` are not in it.
+The recording below is `list`, `describe`, `ps`, and `health` on [`docs/demo/fixture/demo.yaml`](docs/demo/fixture/demo.yaml). Every service in that file is `unpublished`. `list` and `describe` still print the MagicDNS URL. `health` shows public `skip`. `plan` and `up` are not in it.
 
 ![tscatalog list, describe, ps, and health on an unpublished catalog](docs/demo/tscatalog.gif)
 

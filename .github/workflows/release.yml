@@ -54,9 +54,9 @@ jobs:
         run: |
           sha256sum tscatalog-* cat9s-* > SHA256SUMS
           cat > "$GITHUB_WORKSPACE/notes.md" <<'EOF'
-          Linux and macOS binaries for amd64 and arm64. Download `tscatalog-<os>-<arch>` and `cat9s-<os>-<arch>` from the assets below. `chmod +x` both and put them on `PATH`.
+          Linux and macOS binaries for amd64 and arm64. Download `tscatalog-<os>-<arch>` and `cat9s-<os>-<arch>` from the assets below.
 
-          Check `SHA256SUMS`:
+          Check `SHA256SUMS` before renaming. The checksum file lists the asset names.
 
           ```
           sha256sum -c SHA256SUMS
@@ -64,10 +64,13 @@ jobs:
 
           On macOS, `shasum -a 256 -c SHA256SUMS`.
 
-          The binaries are not notarized and have no Developer ID. If macOS blocks the download:
+          The binaries are not notarized and have no Developer ID. If macOS blocks the download, clear quarantine on the asset names, then rename. This is the arm64 Mac pair. Other machines use the matching asset names. Linux skips `xattr`.
 
           ```
-          xattr -d com.apple.quarantine tscatalog cat9s
+          xattr -d com.apple.quarantine tscatalog-darwin-arm64 cat9s-darwin-arm64
+          mv tscatalog-darwin-arm64 tscatalog
+          mv cat9s-darwin-arm64 cat9s
+          chmod +x tscatalog cat9s
           ```
 
           With Go 1.26:
