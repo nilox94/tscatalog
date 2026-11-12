@@ -1,0 +1,34 @@
+#!/bin/sh
+# Regenerate docs/demo/*.gif from the repo root:
+#   docs/demo/record
+#   docs/demo/record tscatalog
+#
+# VHS draws whatever bash prints. This puts docs/demo/redact.py on PATH as
+# bash, after writing the live MagicDNS suffix to a temp file the filter
+# reads. The suffix is removed from that byte stream before ttyd paints a
+# frame. Running vhs on a tape directly skips the filter.
+set -eu
+cd "$(dirname "$0")/../.."
+
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/tscat-record.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT INT TERM
+
+python3 docs/demo/redact.py --self-test
+mkdir -p "$tmp/bin"
+python3 docs/demo/redact.py --discover > "$tmp/needles"
+cp docs/demo/redact.py "$tmp/bin/bash"
+chmod +x "$tmp/bin/bash"
+
+go build -o docs/demo/bin/tscatalog ./cmd/tscatalog
+go build -o docs/demo/bin/cat9s ./cmd/cat9s
+
+export TAPE_REDACT_FILE="$tmp/needles"
+export PATH="$tmp/bin:$PATH"
+
+tapes="tscatalog cat9s"
+if [ "$#" -gt 0 ]; then
+  tapes="$*"
+fi
+for name in $tapes; do
+  vhs "docs/demo/${name}.tape"
+done

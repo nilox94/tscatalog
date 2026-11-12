@@ -1,0 +1,21 @@
+#!/bin/sh
+# Demo stand-in for docs/demo/*.tape.
+# It never talks to tailscaled. status --json has an empty MagicDNS suffix,
+# so list and describe print https://<label>.<tailnet>.ts.net instead of
+# this machine's tailnet name.
+set -eu
+
+cmd="${1:-}"
+sub="${2:-}"
+case "$cmd $sub" in
+"status --json")
+	printf '%s\n' '{"MagicDNSSuffix":""}'
+	;;
+"serve get-config")
+	printf '%s\n' '{"version":"0.0.1","services":{}}'
+	;;
+*)
+	echo "docs/demo/tailscale: refusing $* (demo stub)" >&2
+	exit 1
+	;;
+esac

@@ -179,7 +179,7 @@ Fields, Compose, `requires`, and autostart: [docs/catalog.md](docs/catalog.md). 
 
 `cat9s` is not a `tscatalog` command. It is the other binary.
 
-The recording below is `list`, `describe`, `ps`, and `health` on [`docs/demo/fixture/demo.yaml`](docs/demo/fixture/demo.yaml). Every service in that file is `unpublished`. `list` and `describe` still print the MagicDNS URL. `health` shows public `skip`. `plan` and `up` are not in it.
+The recording below is `list`, `describe`, `ps`, and `health` on [`docs/demo/fixture/demo.yaml`](docs/demo/fixture/demo.yaml). Every service in that file is `unpublished`. The tape puts a stub `tailscale` on `PATH`, so `list` and `describe` print `https://<label>.<tailnet>.ts.net` instead of this machine's MagicDNS name. `health` shows public `skip`. `plan` and `up` are not in it. Regenerate both recordings with `docs/demo/record`, which strips the live MagicDNS suffix from the terminal text before VHS draws a frame.
 
 ![tscatalog list, describe, ps, and health on an unpublished catalog](docs/demo/tscatalog.gif)
 

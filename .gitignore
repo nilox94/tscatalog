@@ -7,3 +7,4 @@
 !.env.example
 catalog.yaml
 /docs/demo/bin/
+/docs/demo/redact.local
