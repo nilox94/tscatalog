@@ -1,6 +1,26 @@
 # Catalog
 
-The file `tscatalog` and `cat9s` load. Discovery and a minimal example are in the [README](../README.md). This page is the schema.
+The file `tscatalog` and `cat9s` load. A minimal example is in the [README](../README.md#catalog). This page is the schema, and how the file is found.
+
+## Discovery
+
+`-f` is the catalog file. When it is omitted:
+
+1. `TSCATALOG_CATALOG`, even when that file is missing.
+2. `$XDG_CONFIG_HOME/tscatalog/catalog.yaml`, or `~/.config/tscatalog/catalog.yaml` when `XDG_CONFIG_HOME` is unset, if that file exists.
+3. `./catalog.yaml`, if that file exists.
+
+With no file, the command exits 1:
+
+```
+no catalog found: use -f, set TSCATALOG_CATALOG, or create <path>
+```
+
+`<path>` is the XDG path above.
+
+`.env` is loaded from the directory of the catalog that was resolved. A missing `.env` is ignored. Process environment wins. Only `TS_*` keys are loaded. See [`.env.example`](../.env.example). Once `~/.config/tscatalog/catalog.yaml` exists, a `.env` next to a clone is not the file that was loaded.
+
+`start`, `stop`, `status`, `logs`, and a detached process do not receive those keys. They get the process environment with every `TS_*` key removed.
 
 `endpoint` defaults to `tcp:443`. `443` is accepted and stored as `tcp:443`.
 
@@ -108,6 +128,8 @@ launch:
 ```
 
 `ps` prints one row per container. `describe`'s `KIND` column is the runtime shape, not `launch.kind`: `process`, `container`, or `external`. A compose spec that fails to load prints `external` there. `ps` prints shape `-`, state `gone`, and the load error.
+
+Compose can interpolate `TS_*` from the environment `tscatalog` is running in. A container receives one only if its Compose file passes it through.
 
 ## ps
 

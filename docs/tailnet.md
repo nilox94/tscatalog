@@ -8,7 +8,21 @@ set TS_API_KEY (or OAuth client id/secret)
 
 If only one of the OAuth variables is set, the error is `set both TS_OAUTH_CLIENT_ID and TS_OAUTH_CLIENT_SECRET`.
 
-How to create the token is in the [README](../README.md#auth). What `list` and `describe` print without a credential is there too.
+How to create the token is in the [README](../README.md#auth).
+
+## Without a credential
+
+`list`, `describe`, `health`, `ps`, `logs`, `stop`, `autostart`, and `up --local` do not require one.
+
+`list` still calls the API and `tailscale serve get-config`. On failure it prints `note:` and the error, then continues. That error is `set TS_API_KEY (or OAuth client id/secret)` only when a missing credential is the failure. A missing `tailscale` binary is included in the same note.
+
+`describe` prints:
+
+```
+note: live overlay unavailable: <error>
+```
+
+Public URLs on `list` and `describe` come from `tailscale status --json`. When that works, the host is the MagicDNS suffix. When it fails, the URL stays `https://<label>.<tailnet>.ts.net`.
 
 ## Plan
 
@@ -82,7 +96,9 @@ If Tailscale refuses until every non-default flag is repeated, apply runs the `t
 
 `up` is launch, then apply, then health. Names limit launch, VIP puts, Serve, steady-state advertise, and probes. The ACL merge is always the whole catalog. A policy write drains and advertises every published service.
 
-`--local` skips apply. Already listening on `local` does not relaunch that process. Launch runs before the credential check.
+`--local` skips apply. It starts and probes without writing the tailnet. A published row still fails its public probe without a credential. Already listening on `local` does not relaunch that process.
+
+Launch runs before the credential check. A missing credential still starts the processes, then apply exits 1.
 
 ## Restart
 
