@@ -81,6 +81,7 @@ func Load(ctx context.Context, dir string, files []string, projectName string) (
 	opts := []composegocli.ProjectOptionsFn{
 		composegocli.WithWorkingDirectory(abs),
 		composegocli.WithOsEnv,
+		composegocli.WithEnvFiles(),
 		composegocli.WithDotEnv,
 		composegocli.WithConfigFileEnv,
 		composegocli.WithDefaultConfigPath,

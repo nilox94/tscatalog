@@ -62,3 +62,22 @@ func TestLoadIncludeOverride(t *testing.T) {
 		t.Fatalf("volumes %#v", svc.Volumes)
 	}
 }
+
+func TestLoadDotEnvFromWorkingDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("PUBLIC_URL=https://clickstack.example.ts.net\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base := []byte("name: demo\nservices:\n  app:\n    image: alpine\n    environment:\n      FRONTEND_URL: ${PUBLIC_URL}\n")
+	if err := os.WriteFile(filepath.Join(dir, "docker-compose.yml"), base, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := Load(context.Background(), dir, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, ok := p.Services["app"].Environment["FRONTEND_URL"]
+	if !ok || v == nil || *v != "https://clickstack.example.ts.net" {
+		t.Fatalf("FRONTEND_URL=%v ok=%v", v, ok)
+	}
+}
