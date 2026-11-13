@@ -446,7 +446,7 @@ func runExternalCmd(ctx context.Context, job logJob, multi bool, w io.Writer, mu
 	if job.spec.Cwd != "" {
 		cmd.Dir = expandHome(job.spec.Cwd)
 	}
-	cmd.Env = os.Environ()
+	cmd.Env = childEnviron()
 	setPgroup(cmd, syscall.SIGTERM)
 	if multi {
 		pw := &prefixWriter{w: w, prefix: job.id + " | ", mu: mu}
@@ -482,7 +482,7 @@ func captureExternal(ctx context.Context, spec catalog.LaunchSpec) ([]string, er
 	if spec.Cwd != "" {
 		cmd.Dir = expandHome(spec.Cwd)
 	}
-	cmd.Env = os.Environ()
+	cmd.Env = childEnviron()
 	setPgroup(cmd, syscall.SIGTERM)
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
@@ -554,7 +554,7 @@ func streamExternal(ctx context.Context, job logJob, multi bool, out chan<- stri
 	if job.spec.Cwd != "" {
 		cmd.Dir = expandHome(job.spec.Cwd)
 	}
-	cmd.Env = os.Environ()
+	cmd.Env = childEnviron()
 	setPgroup(cmd, syscall.SIGTERM)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

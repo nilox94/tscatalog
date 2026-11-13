@@ -57,20 +57,20 @@ func CatalogOwns(s catalog.Service) bool {
 }
 
 // Decide says whether restarting the process can fix this row.
-// A healthy local process is not restarted, including when the host is
-// only not-approved or draining.
+// not-approved and draining are skipped even when the local process is down.
+// A healthy local process is not restarted.
 func Decide(s catalog.Service, rep Report, owned bool) Decision {
+	switch {
+	case strings.Contains(rep.Host, "not-approved"):
+		return Decision{Note: "host is not-approved; restart will not fix it"}
+	case strings.Contains(rep.Host, "draining"):
+		return Decision{Note: "host is draining; restart will not fix it"}
+	}
 	if LocalHealthy(s, rep) {
-		switch {
-		case strings.Contains(rep.Host, "not-approved"):
-			return Decision{Note: "host is not-approved; restart will not fix it"}
-		case strings.Contains(rep.Host, "draining"):
-			return Decision{Note: "host is draining; restart will not fix it"}
-		case !rep.OK && owned:
+		if !rep.OK && owned {
 			return Decision{Action: ActionRestart}
-		default:
-			return Decision{Note: "local process is healthy"}
 		}
+		return Decision{Note: "local process is healthy"}
 	}
 	if rep.Bind == "error" {
 		if rep.Local != "" {

@@ -1,0 +1,119 @@
+version: 2
+
+project_name: tscatalog
+
+builds:
+  - id: tscatalog
+    binary: tscatalog
+    main: ./cmd/tscatalog
+    ldflags:
+      - -s -w -X main.version={{ .Tag }}
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+  - id: cat9s
+    binary: cat9s
+    main: ./cmd/cat9s
+    ldflags:
+      - -s -w -X main.version={{ .Tag }}
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  # Uncompressed names the release page already documents.
+  - id: bin
+    formats: [binary]
+    name_template: "{{ .Binary }}-{{ tolower .Os }}-{{ .Arch }}"
+  # One archive per OS and architecture. A cask has one URL per architecture.
+  - id: brew
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ tolower .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: SHA256SUMS
+  algorithm: sha256
+
+source:
+  enabled: false
+
+changelog:
+  disable: true
+
+release:
+  header: |
+    Linux and macOS binaries for amd64 and arm64. Download `tscatalog-<os>-<arch>` and `cat9s-<os>-<arch>` from the assets below.
+
+    Check `SHA256SUMS` before renaming. The checksum file lists the asset names.
+
+    ```
+    sha256sum -c SHA256SUMS
+    ```
+
+    On macOS, `shasum -a 256 -c SHA256SUMS`.
+
+    The binaries are not notarized and have no Developer ID. If macOS blocks the download, clear quarantine on the asset names, then rename. This is the arm64 Mac pair. Other machines use the matching asset names. Linux skips `xattr`.
+
+    ```
+    xattr -d com.apple.quarantine tscatalog-darwin-arm64 cat9s-darwin-arm64
+    mv tscatalog-darwin-arm64 tscatalog
+    mv cat9s-darwin-arm64 cat9s
+    chmod +x tscatalog cat9s
+    ```
+
+    Homebrew:
+
+    ```
+    brew tap nilox94/tscatalog
+    brew install --cask tscatalog
+    ```
+
+    The `tscatalog_<version>_<os>_<arch>.tar.gz` assets are what that cask installs. Each archive contains `tscatalog` and `cat9s`.
+
+    With Go 1.26:
+
+    ```
+    go install github.com/nilox94/tscatalog/cmd/...@{{ .Tag }}
+    ```
+
+    That installs `tscatalog` and `cat9s`.
+
+    How to run it: https://github.com/nilox94/tscatalog#readme
+
+    Commits: https://github.com/nilox94/tscatalog/commits/{{ .Tag }}
+
+homebrew_casks:
+  - name: tscatalog
+    ids:
+      - brew
+    description: Manage local processes and Compose stacks, and publish them to your tailnet.
+    homepage: https://github.com/nilox94/tscatalog
+    binaries:
+      - tscatalog
+      - cat9s
+    caveats: The binaries are not notarized and have no Developer ID.
+    hooks:
+      post:
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}"]
+          end
+    repository:
+      owner: nilox94
+      name: homebrew-tscatalog
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    commit_author:
+      name: Danilo Gómez
+      email: danilogomez3.14@gmail.com
+    commit_msg_template: "tscatalog {{ .Tag }}"

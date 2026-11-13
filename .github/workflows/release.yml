@@ -8,85 +8,20 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-          - goos: linux
-            goarch: arm64
-          - goos: darwin
-            goarch: amd64
-          - goos: darwin
-            goarch: arm64
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
-      - name: build
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-        run: |
-          mkdir -p dist
-          flags="-s -w -X main.version=${GITHUB_REF_NAME}"
-          go build -ldflags "$flags" -o "dist/tscatalog-${GOOS}-${GOARCH}" ./cmd/tscatalog
-          go build -ldflags "$flags" -o "dist/cat9s-${GOOS}-${GOARCH}" ./cmd/cat9s
-      - uses: actions/upload-artifact@v4
+      - uses: goreleaser/goreleaser-action@v7
         with:
-          name: ${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/*
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-      - name: notes
-        working-directory: dist
-        run: |
-          sha256sum tscatalog-* cat9s-* > SHA256SUMS
-          cat > "$GITHUB_WORKSPACE/notes.md" <<'EOF'
-          Linux and macOS binaries for amd64 and arm64. Download `tscatalog-<os>-<arch>` and `cat9s-<os>-<arch>` from the assets below.
-
-          Check `SHA256SUMS` before renaming. The checksum file lists the asset names.
-
-          ```
-          sha256sum -c SHA256SUMS
-          ```
-
-          On macOS, `shasum -a 256 -c SHA256SUMS`.
-
-          The binaries are not notarized and have no Developer ID. If macOS blocks the download, clear quarantine on the asset names, then rename. This is the arm64 Mac pair. Other machines use the matching asset names. Linux skips `xattr`.
-
-          ```
-          xattr -d com.apple.quarantine tscatalog-darwin-arm64 cat9s-darwin-arm64
-          mv tscatalog-darwin-arm64 tscatalog
-          mv cat9s-darwin-arm64 cat9s
-          chmod +x tscatalog cat9s
-          ```
-
-          With Go 1.26:
-
-          ```
-          go install github.com/nilox94/tscatalog/cmd/...@__TAG__
-          ```
-
-          That installs `tscatalog` and `cat9s`.
-
-          How to run it: https://github.com/nilox94/tscatalog#readme
-
-          Commits: https://github.com/nilox94/tscatalog/commits/__TAG__
-          EOF
-          sed -i "s/__TAG__/${GITHUB_REF_NAME}/g" "$GITHUB_WORKSPACE/notes.md"
-      - name: publish
+          distribution: goreleaser
+          version: v2.20.2
+          args: release --clean
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes-file notes.md
+          GITHUB_TOKEN: ${{ github.token }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

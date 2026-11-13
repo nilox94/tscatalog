@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 	"syscall"
@@ -106,7 +105,7 @@ func externalStatus(ctx context.Context, s catalog.Service, index int, spec cata
 	if spec.Cwd != "" {
 		cmd.Dir = expandHome(spec.Cwd)
 	}
-	cmd.Env = os.Environ()
+	cmd.Env = childEnviron()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

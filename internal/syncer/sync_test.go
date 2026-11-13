@@ -3,8 +3,10 @@ package syncer
 import (
 	"bytes"
 	"context"
+	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"tailscale.com/client/tailscale/v2"
 
@@ -18,6 +20,18 @@ func sampleCatalog() *catalog.File {
 			{Name: "web", DisplayName: "Example web UI", Local: "http://127.0.0.1:8080"},
 			{Name: "api", Local: "http://127.0.0.1:8081"},
 		},
+	}
+}
+
+func TestApplyConfiguredHostOnlyRequiresCredential(t *testing.T) {
+	t.Setenv("TS_API_KEY", "")
+	t.Setenv("TS_OAUTH_CLIENT_ID", "")
+	t.Setenv("TS_OAUTH_CLIENT_SECRET", "")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := ApplyConfigured(ctx, sampleCatalog(), Options{Host: true, DryRun: true}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "set TS_API_KEY (or OAuth client id/secret)") {
+		t.Fatalf("err %v", err)
 	}
 }
 

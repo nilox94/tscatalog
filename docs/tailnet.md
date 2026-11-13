@@ -37,9 +37,9 @@ public: https://<label>.<tailnet>.ts.net
 
 `apply` writes that diff.
 
-Names limit VIP puts, Serve mappings, and steady-state advertise to those catalog services. The ACL merge is always the whole catalog. After an ACL write, every service is drained, re-served, and advertised so auto-approval can attach.
+Names limit VIP puts, Serve mappings, and steady-state advertise to those catalog services. The ACL merge is always the whole catalog. After an ACL write, every published service is drained, re-served, and advertised so auto-approval can attach.
 
-No names means every catalog service. When the selected rows and the ACL are already in sync, apply prints `tailnet unchanged` and does not advertise.
+No names means every published service. When the selected rows and the ACL are already in sync, apply prints `tailnet unchanged` and does not advertise.
 
 ### Flags
 
@@ -80,7 +80,7 @@ If Tailscale refuses until every non-default flag is repeated, apply runs the `t
 
 ## Up
 
-`up` is launch, then apply, then health. Names limit launch, VIP puts, Serve, steady-state advertise, and probes. The ACL merge is always the whole catalog. A policy write drains and advertises every service.
+`up` is launch, then apply, then health. Names limit launch, VIP puts, Serve, steady-state advertise, and probes. The ACL merge is always the whole catalog. A policy write drains and advertises every published service.
 
 `--local` skips apply. Already listening on `local` does not relaunch that process. Launch runs before the credential check.
 
@@ -90,4 +90,4 @@ When the local port is already open, `restart` stops the catalog-owned process f
 
 `restart` does not write the ACL. `requires` are started locally and are not published. `stop` does not follow `requires`.
 
-`restart` and cat9s republish VIP, Serve, and advertise. After an ACL change, drain and re-advertise so auto-approval can attach.
+`restart` and cat9s republish VIP, Serve, and advertise.

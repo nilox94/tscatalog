@@ -9,6 +9,24 @@ import (
 	"github.com/nilox94/tscatalog/internal/catalog"
 )
 
+func TestStatusStripsTailscaleEnv(t *testing.T) {
+	t.Setenv("TS_API_KEY", "tskey-api-secret")
+	s := catalog.Service{
+		Name: "helper",
+		Launch: catalog.Launch{{
+			Start:  []string{"true"},
+			Status: []string{"sh", "-c", "printf '%s\n' \"$TS_API_KEY\""},
+		}},
+	}
+	rows := LaunchStatuses(context.Background(), s, nil, nil)
+	if len(rows) != 1 {
+		t.Fatalf("rows %+v", rows)
+	}
+	if strings.Contains(rows[0].Detail, "tskey-api-secret") {
+		t.Fatalf("status saw TS_API_KEY: %+v", rows[0])
+	}
+}
+
 func TestLaunchStatusUnwatched(t *testing.T) {
 	s := catalog.Service{
 		Name: "helper",

@@ -11,19 +11,17 @@ import (
 
 // ApplyConfigured wires API and host clients, then reconciles the catalog.
 func ApplyConfigured(ctx context.Context, cat *catalog.File, opts Options, w io.Writer) error {
+	c, err := tsapi.NewClient()
+	if err != nil {
+		return err
+	}
 	var api API
 	var pol PolicyAPI
-	if opts.Tailnet || opts.Policy {
-		c, err := tsapi.NewClient()
-		if err != nil {
-			return err
-		}
-		if opts.Tailnet {
-			api = ClientAPI{Services: c.Services()}
-		}
-		if opts.Policy {
-			pol = ClientPolicy{Policy: c.PolicyFile()}
-		}
+	if opts.Tailnet {
+		api = ClientAPI{Services: c.Services()}
+	}
+	if opts.Policy {
+		pol = ClientPolicy{Policy: c.PolicyFile()}
 	}
 	var h Host
 	if opts.Host {

@@ -9,7 +9,10 @@ import (
 
 func TestDecide(t *testing.T) {
 	down := Report{Bind: "down", Local: "down", OK: false}
+	downUnapproved := Report{Bind: "down", Local: "down", Host: "not-approved / ready", OK: false}
+	downDraining := Report{Bind: "down", Local: "down", Host: "approved / draining", OK: false}
 	wedged := Report{Bind: ":8080", Local: "500", OK: false}
+	wedgedUnapproved := Report{Bind: ":8080", Local: "500", Host: "not-approved / ready", OK: false}
 	healthy := Report{Bind: ":8080", Local: "tcp", Host: "approved / ready", OK: true}
 	unapproved := Report{Bind: ":8080", Local: "tcp", Host: "not-approved / ready", OK: false}
 	draining := Report{Bind: ":8080", Local: "200", Host: "approved / draining", OK: false}
@@ -32,6 +35,9 @@ func TestDecide(t *testing.T) {
 		note   string
 	}{
 		{name: "down starts", svc: withLaunch, rep: down, action: ActionStart},
+		{name: "down not approved", svc: withLaunch, rep: downUnapproved, note: "host is not-approved; restart will not fix it"},
+		{name: "down draining", svc: withLaunch, rep: downDraining, note: "host is draining; restart will not fix it"},
+		{name: "unhealthy not approved", svc: withCheck, rep: wedgedUnapproved, owned: true, note: "host is not-approved; restart will not fix it"},
 		{name: "down without launch", svc: noLaunch, rep: down, note: "no launch in catalog"},
 		{name: "owned wedge restarts", svc: withCheck, rep: wedged, owned: true, action: ActionRestart},
 		{name: "foreign wedge", svc: withCheck, rep: wedged, note: "something else holds http://127.0.0.1:8080"},

@@ -1,6 +1,20 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/tscatalog-banner.dark.png">
+  <img alt="tscatalog: a catalog row, a local listener, and a Tailscale HTTPS name" src="docs/tscatalog-banner.light.png">
+</picture>
+
 # tscatalog
 
-One catalog file starts local processes and publishes each one at `https://<label>.<tailnet>.ts.net` on port 443.
+[![Apache-2.0](https://img.shields.io/github/license/nilox94/tscatalog)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/nilox94/tscatalog)](https://github.com/nilox94/tscatalog/releases/latest)
+[![Tests](https://img.shields.io/github/actions/workflow/status/nilox94/tscatalog/test.yml?branch=main&label=tests)](https://github.com/nilox94/tscatalog/actions/workflows/test.yml)
+[![Go](https://img.shields.io/github/go-mod/go-version/nilox94/tscatalog)](go.mod)
+
+One catalog file starts local processes. Published rows are at `https://<label>.<tailnet>.ts.net` on port 443.
+
+The recording below is `list`, `describe`, `ps`, and `health` on [`docs/demo/fixture/demo.yaml`](docs/demo/fixture/demo.yaml). Every service in that file is `unpublished`. The tape puts a stub `tailscale` on `PATH`, so `list` and `describe` print `https://<label>.<tailnet>.ts.net` instead of this machine's MagicDNS name. `health` shows public `skip`. `plan` and `up` are not in it. Regenerate both recordings with `docs/demo/record`, which strips the live MagicDNS suffix from the terminal text before VHS draws a frame.
+
+![tscatalog list, describe, ps, and health on an unpublished catalog](docs/demo/tscatalog.gif)
 
 ## Result
 
@@ -19,13 +33,22 @@ This machine must carry `access.autoApproveHost`. The example uses `tag:server`.
 
 - Linux or macOS. Release binaries are amd64 and arm64.
 - `tailscale` on `PATH`, and `tailscale status` works.
-- HTTPS certificates enabled on the tailnet. `apply` runs `tailscale serve --https=<port> --bg --yes`, where `<port>` is the catalog endpoint (default 443). That command does not open Tailscale's browser prompt.
+- HTTPS certificates enabled on the tailnet.
 - Go 1.26, or a binary from the release.
 - `TS_API_KEY` or an OAuth client before `plan`, `apply`, or `up`.
 
 Windows is not a supported target. `detach: true` fails there with `launch detach is only supported on unix`. `autostart install` is macOS only.
 
 ## Install
+
+### Homebrew
+
+```
+brew tap nilox94/tscatalog
+brew install --cask tscatalog
+```
+
+That installs `tscatalog` and `cat9s`. The cask is updated from each release in [nilox94/homebrew-tscatalog](https://github.com/nilox94/homebrew-tscatalog).
 
 ### Go
 
@@ -37,7 +60,7 @@ That installs `tscatalog` and `cat9s` into `$(go env GOPATH)/bin`. From a checko
 
 ### Release
 
-[Latest release](https://github.com/nilox94/tscatalog/releases/latest). The assets are uncompressed binaries.
+[Latest release](https://github.com/nilox94/tscatalog/releases/latest). The table lists the uncompressed binaries.
 
 | | amd64 | arm64 |
 | --- | --- | --- |
@@ -96,7 +119,7 @@ Then:
 
 An API access token or an OAuth client. Put it in the environment, or in a gitignored `.env` next to the catalog. See [`.env.example`](.env.example). Process environment wins. Only `TS_*` keys are loaded from that file.
 
-`start`, `stop`, and a detached process do not inherit the file. Every `TS_*` variable is removed from their environment. `status` and `logs` still see the process environment. Compose can interpolate `TS_*`. A container receives one only if its Compose file passes it through.
+Compose can interpolate `TS_*`. A container receives one only if its Compose file passes it through.
 
 | Variable | |
 | --- | --- |
@@ -177,15 +200,9 @@ Fields, Compose, `requires`, and autostart: [docs/catalog.md](docs/catalog.md). 
 
 `apply` flags (`--dry-run`, `--tailnet-only`, `--host-only`, `--policy-only`, `--no-policy`, `--prune`, `--reset-node`) are in [docs/tailnet.md](docs/tailnet.md#apply). `up` passes `--prune` and `--reset-node` through.
 
-`cat9s` is not a `tscatalog` command. It is the other binary.
-
-The recording below is `list`, `describe`, `ps`, and `health` on [`docs/demo/fixture/demo.yaml`](docs/demo/fixture/demo.yaml). Every service in that file is `unpublished`. The tape puts a stub `tailscale` on `PATH`, so `list` and `describe` print `https://<label>.<tailnet>.ts.net` instead of this machine's MagicDNS name. `health` shows public `skip`. `plan` and `up` are not in it. Regenerate both recordings with `docs/demo/record`, which strips the live MagicDNS suffix from the terminal text before VHS draws a frame.
-
-![tscatalog list, describe, ps, and health on an unpublished catalog](docs/demo/tscatalog.gif)
-
 ## cat9s
 
-`cat9s` is a separate program. It is a terminal UI for the same catalog. It needs a terminal. `tscatalog cat9s` fails as an unknown command.
+`cat9s` is a separate program. It is a terminal UI for the same catalog.
 
 A published restart needs a credential. Browsing does not. A published restart republishes VIP, Serve, and advertise. cat9s does not write the ACL.
 
@@ -209,14 +226,3 @@ Published rows that are down or unhealthy are listed first. Restart starts a dea
 | Launch | How that row starts. A process, a Compose project, or an external helper. |
 | Process | A program this tool detaches and later stops. |
 | External | A helper this tool runs and then leaves alone. Something else owns the listener. |
-
-The same list, including words this repo does not use, is [CONTEXT.md](CONTEXT.md).
-
-## More
-
-| Page | |
-| --- | --- |
-| [docs/catalog.md](docs/catalog.md) | Fields, launch, Compose, logs, autostart. |
-| [docs/tailnet.md](docs/tailnet.md) | `plan`, `apply`, `up`, `restart`. |
-| [docs/health.md](docs/health.md) | Probe columns and a closed-port example. |
-| [docs/adr/0001-login-agent-not-supervisor.md](docs/adr/0001-login-agent-not-supervisor.md) | Why autostart is one login agent. |

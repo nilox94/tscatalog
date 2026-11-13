@@ -29,7 +29,7 @@ import (
 // version is set with -ldflags -X main.version=...
 var version = "dev"
 
-const rootLong = `One catalog file starts local processes and publishes each one at
+const rootLong = `One catalog file starts local processes. Published rows are at
 https://<label>.<tailnet>.ts.net on port 443.
 
 Catalog file (when -f is omitted): TSCATALOG_CATALOG, even if that file is missing.
@@ -40,8 +40,7 @@ The tailscale CLI must be on PATH and logged in.
 
 Auth for the control plane comes from the environment, or from .env next to the catalog.
 Only TS_* keys in that file are loaded. Process environment wins.
-start, stop, and a detached process do not inherit that file. Every TS_* variable is removed from their environment.
-status and logs still see the process environment. Compose can interpolate TS_*.
+Compose can interpolate TS_*.
 A container receives one only if its Compose file passes it through.
   TS_API_KEY                  access token (tskey-api-…, not a device auth key)
   TS_OAUTH_CLIENT_ID/SECRET   alternative to an API key (scope: all)

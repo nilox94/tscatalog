@@ -1,10 +1,14 @@
 /tscatalog
 /catalog
+
 /dist/
 *.exe
 .env
 .env.*
 !.env.example
 catalog.yaml
+
 /docs/demo/bin/
 /docs/demo/redact.local
+
+.DS_Store

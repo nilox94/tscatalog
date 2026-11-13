@@ -15,7 +15,7 @@ The file `tscatalog` and `cat9s` load. Discovery and a minimal example are in th
 | `displayName`, `comment` | Shown by `describe`. Not sent as the DNS name. |
 | `local` | `http` or `https`, host `127.0.0.1`, `localhost`, or `::1`, and a port. |
 | `requires` | Other catalog names. `up`, `restart`, `health`, and `autostart` start or probe them first. `stop` does not stop them. |
-| `unpublished` | Launch and health only. No VIP, Serve, advertise, or ACL grant. `list` still prints the MagicDNS name. |
+| `unpublished` | Launch and health only. No VIP, Serve, advertise, or ACL grant. |
 | `autostart` | Included in `tscatalog autostart`. Requires `launch`. |
 | `launch` | One mapping, or a list. Specs start in order. |
 | `check` | Optional HTTP probe. See [Health](health.md). |
@@ -53,8 +53,6 @@ services:
 ## Launch
 
 `start`, `stop`, `status`, and `logs` are argv, not a shell. `kind` may be omitted: a strict `docker compose up` argv is compose, `detach: true` is a process, and anything else is an external helper.
-
-`start`, `stop`, and a detached process do not inherit `.env`. Every `TS_*` variable is removed from their environment. `status` and `logs` still see the process environment. Compose can interpolate `TS_*`. A container receives one only if its Compose file passes it through.
 
 ### Process
 
